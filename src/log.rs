@@ -17,7 +17,7 @@ pub fn add(dir: &Path, kind: &str, text: &str) {
         text.replace('\n', " ").trim()
     );
     let file = path(dir);
-    let mut lines: Vec<String> = std::fs::read_to_string(&file)
+    let mut lines: Vec<String> = crate::fsx::read_string(&file)
         .unwrap_or_default()
         .lines()
         .map(str::to_owned)
@@ -38,7 +38,7 @@ pub fn clear(dir: &Path) {
 
 /// The last 100 entries, newest first, for the web panel.
 pub fn latest(dir: &Path) -> Vec<serde_json::Value> {
-    let text = std::fs::read_to_string(path(dir)).unwrap_or_default();
+    let text = crate::fsx::read_string(&path(dir)).unwrap_or_default();
     text.lines()
         .rev()
         .map(|line| {

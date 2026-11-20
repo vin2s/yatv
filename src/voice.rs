@@ -1,5 +1,5 @@
 //! Alice's local IPC (Quasar) on 127.0.0.1:9875 — YATV listens to it directly,
-//! so it works without soundya. The wire format is a u32 little-endian length
+//! so it works without yatv. The wire format is a u32 little-endian length
 //! followed by a protobuf-like message {252: payload, 253: type}.
 
 use std::{
@@ -58,7 +58,7 @@ pub fn watch(tx: Sender<Cmd>) {
     });
 }
 
-// ---- minimal protobuf reader/writer (the same as soundya's, field 253 needs
+// ---- minimal protobuf reader/writer (the same as yatv's, field 253 needs
 // a multi-byte varint tag: a one-byte tag silently broke Alice's state frames).
 
 fn varint(data: &[u8], offset: &mut usize) -> Option<u64> {
@@ -150,7 +150,7 @@ fn put_bytes(out: &mut Vec<u8>, field: u64, value: &[u8]) {
 
 /// Stops Alice's own answer to the phrase YATV took over. Without this she
 /// says «не нашла ничего подобного» / «воспроизведение не поддерживается»
-/// over the action we perform: the cancel is the same frame soundya sends.
+/// over the action we perform: the cancel is the same frame yatv sends.
 pub fn cancel_alice() {
     let frame = rpc("AliceCapability", 8, &[8, 3]);
     let address: SocketAddr = ADDRESS.parse().expect("address");
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn parses_a_recognized_phrase_frame() {
-        // The wire shape soundya::recognized() uses:
+        // The wire shape yatv::recognized() uses:
         // state{1:1, 2:"request", 15:{1:"text", 2:1, 4:1}}
         let phrase = "найди фильм колобок на делюкс";
         let mut result = Vec::new();

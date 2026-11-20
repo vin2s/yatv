@@ -1,9 +1,9 @@
 #!/bin/sh
 # Cross-builds YATV for the Yandex Station (ARMv7 hard-float, glibc <= 2.23).
-# Runs in WSL / Linux. Does not touch soundya.
+# Runs in WSL / Linux. Does not touch yatv.
 set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-CACHE=${SOUNDYA_CACHE:-"${XDG_CACHE_HOME:-$HOME/.cache}/soundya"}
+CACHE=${YATV_CACHE:-"${XDG_CACHE_HOME:-$HOME/.cache}/yatv"}
 TC_NAME=gcc-linaro-6.5.0-2018.12-x86_64_arm-linux-gnueabihf
 TC="$CACHE/$TC_NAME"
 TARGET=armv7-unknown-linux-gnueabihf

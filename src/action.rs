@@ -1,5 +1,5 @@
 //! The actions YATV can perform on the TV. One enum, shared by the voice
-//! parser, the panel and the ADB runner. No dependency on soundya's Alice.
+//! parser, the panel and the ADB runner. No dependency on yatv's Alice.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TvAction {

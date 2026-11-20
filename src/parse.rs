@@ -1,6 +1,6 @@
-//! YATV's own voice parser. Adapted from soundya's `alice::tv` and
+//! YATV's own voice parser. Adapted from yatv's `alice::tv` and
 //! `app_phrase_intent`, but with no dependency on music, PC or Alice's state:
-//! every TV phrase is handled here, with or without soundya installed.
+//! every TV phrase is handled here, with or without yatv installed.
 
 use crate::{action::{normalize, normalize_phrase, TvAction}, tv};
 
@@ -132,7 +132,7 @@ pub fn parse(text: &str) -> Option<TvAction> {
         return Some(TvAction::OpenOn(pkg, if hint.is_empty() { phrase_tv } else { hint }));
     }
 
-    // 1. A film search: the noun is required, exactly like soundya.
+    // 1. A film search: the noun is required, exactly like yatv.
     let after = ["найди ", "поищи ", "покажи "]
         .iter()
         .find_map(|v| n.strip_prefix(v))?;

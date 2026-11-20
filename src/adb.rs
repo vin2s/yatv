@@ -4,7 +4,7 @@
 //! The speaker has no adb, so the protocol is spoken here: CNXN, AUTH with an RSA
 //! key (made on the speaker on first use, 2048 bits), OPEN "shell:…", WRTE/OKAY/CLSE.
 //! The first time the TV shows «Разрешить отладку?» for this key; after «Всегда
-//! разрешать» it lets soundya in silently.
+//! разрешать» it lets yatv in silently.
 //!
 //! RSA is done with a tiny Montgomery big-number implementation (no crates):
 //! a key takes about a second to make once, a signature a fraction of a second.
@@ -375,7 +375,7 @@ impl Key {
         std::fs::write(path, format!("n={}\nd={}\n", self.n.to_hex(), self.d.to_hex()))
     }
 
-    /// The key in a file next to soundya's settings, made on first use.
+    /// The key in a file next to yatv's settings, made on first use.
     pub fn load_or_create(dir: &Path) -> io::Result<Key> {
         let path = dir.join("adbkey");
         if let Some(k) = Key::load(&path) {
@@ -519,7 +519,7 @@ fn connect_max(host: &str, key: &Key, confirm_wait: Duration) -> Result<(TcpStre
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(3)).map_err(|e| Error::Unreachable(e.to_string()))?;
     s.set_read_timeout(Some(Duration::from_secs(5)))?;
     s.set_nodelay(true)?;
-    send(&mut s, CNXN, VERSION, MAX_DATA, b"host::soundya\0")?;
+    send(&mut s, CNXN, VERSION, MAX_DATA, b"host::yatv\0")?;
     let mut signed = false;
     let mut offered_key = false;
     loop {
@@ -547,7 +547,7 @@ fn connect_max(host: &str, key: &Key, confirm_wait: Duration) -> Result<(TcpStre
             }
             AUTH if m.a0 == AUTH_TOKEN && !offered_key => {
                 offered_key = true;
-                send(&mut s, AUTH, AUTH_RSAPUBLICKEY, 0, &key.android_public("soundya@yandex-station"))?;
+                send(&mut s, AUTH, AUTH_RSAPUBLICKEY, 0, &key.android_public("yatv@yandex-station"))?;
                 // The TV now asks the user; the answer (CNXN) comes when they press «Разрешить».
                 s.set_read_timeout(Some(confirm_wait.max(Duration::from_secs(1))))?;
             }
@@ -815,7 +815,7 @@ mod tests {
     #[test]
     fn the_remote_keeps_one_connection() {
         use std::sync::atomic::Ordering;
-        let dir = std::env::temp_dir().join(format!("soundya-adb-kept-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("yatv-adb-kept-{}", std::process::id()));
         crate::fsx::ensure_dir(&dir);
         let key = Key::load_or_create(&dir).unwrap();
         let w = Duration::from_secs(2);

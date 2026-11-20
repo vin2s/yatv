@@ -1,8 +1,8 @@
 //! YATV — a small, self-contained TV controller for a Yandex Station.
 //!
 //! It speaks to an Android TV over network ADB, understands the owner's
-//! phrases (with or without soundya installed), and offers its own web panel
-//! on a port that does not conflict with soundya (8765).
+//! phrases (with or without yatv installed), and offers its own web panel
+//! on a port that does not conflict with yatv (8765).
 
 mod action;
 mod adb;
@@ -59,7 +59,7 @@ fn main() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(DEFAULT_PORT);
 
-    // Alice's local IPC: phrases arrive here even if soundya is not installed.
+    // Alice's local IPC: phrases arrive here even if yatv is not installed.
     voice::watch(tx.clone());
     // The panel and the HTTP API: same parser, same TV actions.
     server::serve(port, tx.clone());
@@ -91,13 +91,13 @@ fn controller(dir: PathBuf, rx: Receiver<Cmd>) {
                 // Full trace: every phrase from Alice/the panel, with the TV
                 // hint, so a wrong capture can be diagnosed from the journal.
                 log::add(&dir, "heard", &format!("{phrase:?} hint={tv_hint:?}"));
-                // First: is this even a TV command? Like soundya's device_in,
+                // First: is this even a TV command? Like yatv's device_in,
                 // a named device only counts when the rest is a TV action
                 // («котел на 65» is Alice's kettle, not our TV).
                 let parsed = parse::parse(&phrase);
                 if parsed.is_some() {
                     // Only a phrase we actually take: cancel Alice's own
-                    // answer, as soundya does only after intent() succeeds.
+                    // answer, as yatv does only after intent() succeeds.
                     // For all other phrases she answers normally (weather,
                     // greetings, her smart-home entities).
                     voice::cancel_alice();

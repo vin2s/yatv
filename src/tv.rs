@@ -303,7 +303,7 @@ const START_WORDS: [&str; 8] = ["подключить", "подключитьс�
 fn dump_screen(sh: &dyn Fn(&str) -> Result<String, String>) -> Result<Vec<UiNode>, String> {
     // uiautomator needs a still screen; a moving one («could not get idle state») is tried again.
     for _ in 0..3 {
-        let out = sh("uiautomator dump /data/local/tmp/soundya-ui.xml >/dev/null 2>&1; cat /data/local/tmp/soundya-ui.xml 2>/dev/null")?;
+        let out = sh("uiautomator dump /data/local/tmp/yatv-ui.xml >/dev/null 2>&1; cat /data/local/tmp/yatv-ui.xml 2>/dev/null")?;
         let nodes = ui_nodes(&out);
         if !nodes.is_empty() {
             return Ok(nodes);

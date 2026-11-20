@@ -87,7 +87,7 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
             // Cached app list for one TV, stored per host.
             let host = path.split_once('?').map_or("", |(_, q)| q);
             let file = crate::state_dir().join(format!("apps-{}.json", host.replace(['.', ':'], "_")));
-            let data = std::fs::read_to_string(file).unwrap_or_else(|_| "{\"apps\":[],\"names\":{}}".into());
+            let data = crate::fsx::read_string(&file).unwrap_or_else(|| "{\"apps\":[],\"names\":{}}".into());
             ("200 OK", "application/json", data)
         }
         ("POST", "/api/apps") => {

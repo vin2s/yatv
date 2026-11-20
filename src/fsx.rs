@@ -4,7 +4,7 @@
 //! On 32-bit ARM an unknown syscall number is not answered with ENOSYS: the
 //! kernel kills the process with SIGILL. Rust's std uses `statx` for
 //! `metadata`, `Path::exists`/`is_dir`, `create_dir_all` and the size hint in
-//! `fs::read_to_string`, so those must not be used anywhere in soundya.
+//! `fs::read_to_string`, so those must not be used anywhere in yatv.
 
 use std::{
     fs::File,
@@ -39,7 +39,7 @@ pub fn copy(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// `std::fs::remove_dir_all` without `lstat`: a directory is whatever `read_dir`
-/// opens. Not for trees with symlinks to directories (soundya makes none).
+/// opens. Not for trees with symlinks to directories (yatv makes none).
 pub fn remove_tree(path: &Path) {
     if let Ok(entries) = std::fs::read_dir(path) {
         for e in entries.flatten() {
@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn no_statx_calls_in_speaker_code() {
         // The installer shares this file but runs on Mac/Windows, where std is fine.
-        if env!("CARGO_PKG_NAME") != "soundya" {
+        if env!("CARGO_PKG_NAME") != "yatv" {
             return;
         }
         let banned = [
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn copy_and_remove_tree() {
-        let d = std::env::temp_dir().join(format!("soundya-fsx-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("yatv-fsx-{}", std::process::id()));
         remove_tree(&d);
         ensure_dir(&d);
         ensure_dir(&d.join("sub"));

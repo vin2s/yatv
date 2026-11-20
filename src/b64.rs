@@ -1,5 +1,5 @@
 //! Standard base64 — only what the ADB client needs for its RSA public key.
-//! Kept separate so YATV does not depend on soundya's PC module.
+//! Kept separate so YATV does not depend on yatv's PC module.
 
 pub fn base64(data: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
