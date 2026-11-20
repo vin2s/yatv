@@ -1,0 +1,19 @@
+#!/bin/sh
+# Autostart YATV on the speaker: its own port (8766), own dir, own ADB key.
+DIR=/data/opt/yatv
+LOG=/tmp/yatv.log
+PID=/run/yatv.pid
+start() {
+  [ -x "$DIR/yatv" ] || { echo "$(date) no $DIR/yatv" >> "$LOG"; return 1; }
+  pidof yatv >/dev/null 2>&1 && return 0
+  # Detach from rcS: adb shell would otherwise wait on the inherited stdout.
+  (cd "$DIR" && nohup ./yatv daemon >>"$LOG" 2>&1 </dev/null &)
+  sleep 1
+  echo "$(date) yatv started" >> "$LOG"
+}
+case "$1" in
+  start)   start ;;
+  stop)    killall yatv 2>/dev/null ;;
+  restart) killall yatv 2>/dev/null; sleep 1; start ;;
+esac
+exit 0

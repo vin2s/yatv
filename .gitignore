@@ -1,0 +1,7 @@
+target/
+dist/
+*.tar
+*.apk
+*.7z
+*.zip
+dev/

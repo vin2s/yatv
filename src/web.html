@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YATV — управление телевизором</title>
+<style>
+:root { color-scheme: dark; --bg:#141414; --card:#1e1e1e; --ink:#f2f2f2; --dim:#aaa; --line:#333; --accent:#ffd54a; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui,sans-serif; }
+.wrap { max-width:900px; margin:0 auto; padding:22px 16px 60px; }
+h1 { font-size:24px; margin:0 0 2px; }
+h1 small { font-size:13px; color:var(--dim); font-weight:normal; }
+h2 { font-size:17px; margin:26px 0 10px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:10px 0; }
+label { display:block; margin:8px 0 4px; color:var(--dim); font-size:13px; }
+input, select, textarea, button { font:inherit; color:var(--ink); background:#272727; border:1px solid var(--line); border-radius:8px; padding:9px 11px; }
+input, select, textarea { width:100%; }
+button { cursor:pointer; width:auto; background:var(--accent); color:#1a1a1a; border:0; font-weight:600; }
+button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
+button.danger { background:transparent; color:#ff8a80; border:1px solid #5a2a2a; }
+.row { display:flex; gap:8px; align-items:end; flex-wrap:wrap; }
+.row > * { flex:1 1 160px; }
+.row button { flex:none; }
+.hint { color:var(--dim); font-size:13px; margin:6px 0; }
+.msg { min-height:20px; margin:8px 0; color:var(--accent); font-size:14px; }
+.msg.error { color:#ff8a80; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; }
+.grid button { width:100%; background:#272727; color:var(--ink); border:1px solid var(--line); }
+code { background:#000; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>YATV <small id="version"></small></small></h1>
+<p class="hint">Автономный контроллер телевизора. Работает отдельно от soundya: свой порт, свой ADB-ключ, свой голос.</p>
+
+<h2>Телевизоры</h2>
+<div class="card">
+  <p class="hint">Список ТВ: имя, другие имена голосом, адрес и приложение для поиска фильма. «найди фильм X» ищет в приложении первого ТВ; «… на втором этаже» — на нужном.</p>
+  <div id="tvs"></div>
+  <div class="row" style="margin-top:8px">
+    <button class="ghost" onclick="addTv()">+ Добавить ТВ</button>
+    <button onclick="saveAll()">Сохранить всё</button>
+  </div>
+  <div class="msg" id="tvmsg"></div>
+</div>
+
+<h2>Фразы</h2>
+<div class="card">
+  <p class="hint">Кроме «найди фильм X», YATV берёт только эти фразы. Для каждой — приложение и ТВ (по умолчанию — первый в списке). Пример: «free tv» → открыть Free TV на первом этаже; «free tv на втором этаже» → на втором.</p>
+  <div id="phrases"></div>
+  <div class="row" style="margin-top:8px">
+    <button class="ghost" onclick="addPhrase()">+ Добавить фразу</button>
+    <button onclick="saveAll()">Сохранить всё</button>
+  </div>
+  <div class="msg" id="phrasemsg"></div>
+</div>
+
+<h2>Проверить фразу</h2>
+<div class="card">
+  <div class="row">
+    <input id="phrase" placeholder="найди фильм колобок на втором этаже">
+    <button onclick="runPhrase()">Выполнить</button>
+  </div>
+  <p class="hint">Тот же разбор, что и у голосовой фразы.</p>
+  <div class="msg" id="cmdmsg"></div>
+</div>
+
+<h2>Пульт</h2>
+<div class="card">
+  <div class="grid">
+    <button onclick="cmd('tv key up')">↑ Вверх</button>
+    <button onclick="cmd('tv key center')">ОК</button>
+    <button onclick="cmd('tv key down')">↓ Вниз</button>
+    <button onclick="cmd('tv key left')">← Лево</button>
+    <button onclick="cmd('tv key back')">Назад</button>
+    <button onclick="cmd('tv key right')">→ Право</button>
+    <button onclick="cmd('tv key play')">▶‖</button>
+    <button onclick="cmd('tv key home')">Домой</button>
+    <button onclick="cmd('tv key volume_up')">＋ Громче</button>
+    <button onclick="cmd('tv key volume_down')">− Тише</button>
+  </div>
+  <div class="msg" id=" remotemsg"></div>
+</div>
+
+<h2>Журнал (последние 200, с отладкой)</h2>
+<div class="card">
+  <div class="row"><button class="ghost" onclick="loadJournal()">Обновить</button><button class="danger" onclick="clearJournal()">Очистить</button></div>
+  <pre id="log" style="white-space:pre-wrap;color:var(--dim);margin:8px 0 0;max-height:360px;overflow:auto"></pre>
+</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const state = { tvs: [], phrases: [], appsByHost: {} };
+let settings = {};
+function show(id, text, bad) { const e = $(id); if (!e) return; e.textContent = text || ''; e.className = 'msg' + (bad ? ' error' : ''); }
+function log(line) { $('log').textContent = (line + '\n' + $('log').textContent).split('\n').slice(0, 25).join('\n'); }
+async function post(path, body) { return await (await fetch(path, { method: 'POST', body })).text(); }
+async function postJSON(path, obj) { return post(path, JSON.stringify(obj)); }
+async function apiCmd(text) { return await post('/api/cmd', text); }
+async function cmd(text) { const r = await apiCmd(text); show('cmdmsg', r, r.startsWith('error')); log(text + ' → ' + r); return r; }
+async function runPhrase() { await cmd($('phrase').value.trim()); }
+
+async function load() {
+  settings = await (await fetch('/api/status')).json();
+  $('version').textContent = 'v' + (settings.version || '?') + '  ·  yatv.local';
+  state.tvs = settings.tvs || []; state.phrases = settings.phrases || []; state.appsByHost = {};
+  for (const t of state.tvs) {
+    if (!t.host) continue;
+    try {
+      const j = await (await fetch('/api/apps?' + encodeURIComponent(t.host))).json();
+      state.appsByHost[t.host] = j;
+    } catch (e) { state.appsByHost[t.host] = { apps: [], names: {} }; }
+  }
+  renderTvs(); renderPhrases(); loadJournal();
+}
+function appSelect(value, host) {
+  const cached = (host && state.appsByHost[host]) || { apps: [], names: {} };
+  const apps = cached.apps || [], names = cached.names || {};
+  const sel = document.createElement('select');
+  const opts = [['', '— приложение —']].concat(apps.map(x => [x, names[x] || x]));
+  if (value && !opts.some(o => o[0] === value)) opts.unshift([value, value]);
+  sel.replaceChildren(...opts.map(([v,t]) => { const o=document.createElement('option'); o.value=v; o.textContent=t; return o; }));
+  sel.value = value || '';
+  return sel;
+}
+function renderTvs() {
+  const box = $('tvs'); box.replaceChildren();
+  state.tvs.forEach((t, i) => {
+    const row = document.createElement('div'); row.className = 'row';
+    const n = document.createElement('input'); n.value = t.name || ''; n.placeholder = 'второй этаж'; n.oninput = () => t.name = n.value;
+    const a = document.createElement('input'); a.value = (t.aliases || []).join(', '); a.placeholder = 'спальная, наверху'; a.title = 'Другие имена через запятую'; a.oninput = () => t.aliases = a.value.split(',').map(s => s.trim()).filter(Boolean);
+    const h = document.createElement('input'); h.value = t.host || ''; h.placeholder = '192.168.1.128'; h.oninput = () => t.host = h.value;
+    const sa = appSelect(t.search_app || '', t.host); sa.title = 'Приложение для «найди фильм X»'; sa.onchange = () => t.search_app = sa.value;
+    const load = document.createElement('button'); load.className = 'ghost'; load.textContent = 'Приложения';
+    load.title = 'Загрузить список приложений с этого ТВ';
+    load.onclick = async () => {
+      if (!h.value.trim()) { show('tvmsg', 'Сначала укажите IP', true); return; }
+      show('tvmsg', 'Спрашиваю ' + h.value + '…');
+      const r = await apiCmd('tv@' + h.value.trim() + ' apps');
+      try {
+        const j = JSON.parse(r.replace(/^OK:\s*/, ''));
+        state.appsByHost[h.value.trim()] = j;
+        await post('/api/apps', h.value.trim() + '\n' + r.replace(/^OK:\s*/, ''));
+        renderTvs(); renderPhrases();
+        show('tvmsg', 'Приложения загружены: ' + (j.apps || []).length);
+      } catch (e) { show('tvmsg', 'Не удалось прочитать список', true); }
+    };
+    const del = document.createElement('button'); del.className = 'danger'; del.textContent = '✕'; del.onclick = () => { state.tvs.splice(i,1); renderTvs(); renderPhrases(); };
+    row.append(n, a, h, sa, load, del); box.append(row);
+  });
+}
+function tvSelect(value) {
+  const sel = document.createElement('select');
+  sel.appendChild(new Option('— первый ТВ —', ''));
+  state.tvs.forEach(t => sel.appendChild(new Option(t.name || t.host, t.name)));
+  sel.value = value || '';
+  return sel;
+}
+function renderPhrases() {
+  const box = $('phrases'); box.replaceChildren();
+  state.phrases.forEach((p, i) => {
+    const row = document.createElement('div'); row.className = 'row';
+    const ph = document.createElement('input'); ph.value = p.phrase || ''; ph.placeholder = 'free tv'; ph.oninput = () => p.phrase = ph.value;
+    const tvName = p.tv || (state.tvs[0] || {}).name || '';
+    const tvObj = state.tvs.find(t => t.name === tvName) || state.tvs[0] || {};
+    const ap = appSelect(p.pkg || '', tvObj.host); ap.onchange = () => p.pkg = ap.value;
+    const tv = tvSelect(p.tv || ''); tv.onchange = () => p.tv = tv.value;
+    const del = document.createElement('button'); del.className = 'danger'; del.textContent = '✕'; del.onclick = () => { state.phrases.splice(i,1); renderPhrases(); };
+    row.append(ph, ap, tv, del); box.append(row);
+  });
+}
+function addTv() { state.tvs.push({ name: '', aliases: [], host: '', search_app: '' }); renderTvs(); renderPhrases(); }
+function addPhrase() { state.phrases.push({ phrase: '', pkg: '', tv: '' }); renderPhrases(); }
+async function saveAll() {
+  const tvs = state.tvs.filter(t => t.name.trim() && t.host.trim());
+  const phrases = state.phrases.filter(p => p.phrase.trim() && p.pkg);
+  const r = await postJSON('/api/settings', { tvs, phrases });
+  show('tvmsg', r, r.startsWith('error')); show('phrasemsg', r, r.startsWith('error'));
+  await load();
+}
+async function loadJournal() {
+  const j = await (await fetch('/api/status')).json();
+  $('log').textContent = (j.journal || []).map(e => `${formatTime(e.time)} [${e.kind}] ${e.text}`).join('\n');
+}
+async function clearJournal() { await post('/api/journal/clear', ''); loadJournal(); }
+function formatTime(t) {
+  if (/^\d+$/.test(t || '')) return new Date(parseInt(t,10) * 1000).toLocaleString('ru-RU', { hour12: false });
+  return t || '';
+}
+load();
+</script>
+</body>
+</html>

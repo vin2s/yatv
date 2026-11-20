@@ -1,0 +1,327 @@
+//! Alice's local IPC (Quasar) on 127.0.0.1:9875 — YATV listens to it directly,
+//! so it works without soundya. The wire format is a u32 little-endian length
+//! followed by a protobuf-like message {252: payload, 253: type}.
+
+use std::{
+    collections::VecDeque,
+    io::{self, Read, Write},
+    net::{SocketAddr, TcpStream},
+    sync::mpsc::Sender,
+    thread,
+    time::Duration,
+};
+
+use crate::{action::normalize, Cmd};
+
+pub const ADDRESS: &str = "127.0.0.1:9875";
+const MAX_FRAME: usize = 512 * 1024;
+
+/// «найди фильм колобок на втором этаже» → (command, "на втором этаже").
+/// Only a trailing «на …» of at most three words is a TV hint; app aliases
+/// like «на делюкс» are handled by the parser separately.
+pub fn split_tv_hint(text: &str) -> (String, String) {
+    // `rfind` on an ASCII needle always lands on a UTF-8 char boundary.
+    let at = match text.rfind(" на ") {
+        Some(i) => i,
+        None => return (text.to_owned(), String::new()),
+    };
+    // " на " is 6 bytes in UTF-8 (space + 2 Cyrillic letters + space).
+    let tail = match text.get(at + 6..) {
+        Some(t) => t.trim(),
+        None => return (text.to_owned(), String::new()),
+    };
+    let head = match text.get(..at) {
+        Some(h) => h.trim(),
+        None => return (text.to_owned(), String::new()),
+    };
+    if tail.is_empty() || tail.split_whitespace().count() > 3 || head.is_empty() {
+        return (text.to_owned(), String::new());
+    }
+    (head.to_owned(), format!("на {tail}"))
+}
+
+pub fn watch(tx: Sender<Cmd>) {
+    thread::spawn(move || {
+        let address: SocketAddr = ADDRESS.parse().expect("address");
+        let mut seen: VecDeque<Vec<u8>> = VecDeque::new();
+        loop {
+            match TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
+                Ok(mut socket) => {
+                    eprintln!("voice: connected to Alice");
+                    let result = read_frames(&mut socket, &tx, &mut seen);
+                    eprintln!("voice: connection lost ({result:?}); retrying");
+                }
+                Err(_) => {}
+            }
+            thread::sleep(Duration::from_secs(2));
+        }
+    });
+}
+
+// ---- minimal protobuf reader/writer (the same as soundya's, field 253 needs
+// a multi-byte varint tag: a one-byte tag silently broke Alice's state frames).
+
+fn varint(data: &[u8], offset: &mut usize) -> Option<u64> {
+    let mut value = 0u64;
+    for shift in (0..70).step_by(7) {
+        let byte = *data.get(*offset)?;
+        *offset += 1;
+        if shift == 63 && byte > 1 {
+            return None;
+        }
+        value |= u64::from(byte & 127) << shift;
+        if byte < 128 {
+            return Some(value);
+        }
+    }
+    None
+}
+
+#[derive(Clone, Copy)]
+enum Value<'a> {
+    Number(u64),
+    Bytes(&'a [u8]),
+}
+
+fn field(data: &[u8], wanted: u64) -> Option<Value<'_>> {
+    let mut offset = 0;
+    while offset < data.len() {
+        let key = varint(data, &mut offset)?;
+        if key >> 3 == 0 {
+            return None;
+        }
+        let value = match key & 7 {
+            0 => Value::Number(varint(data, &mut offset)?),
+            2 => {
+                let len = usize::try_from(varint(data, &mut offset)?).ok()?;
+                let end = offset.checked_add(len)?;
+                let bytes = data.get(offset..end)?;
+                offset = end;
+                Value::Bytes(bytes)
+            }
+            1 | 5 => {
+                offset = offset.checked_add(if key & 7 == 1 { 8 } else { 4 })?;
+                if offset > data.len() {
+                    return None;
+                }
+                continue;
+            }
+            _ => return None,
+        };
+        if key >> 3 == wanted {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn bytes(data: &[u8], n: u64) -> Option<&[u8]> {
+    match field(data, n)? {
+        Value::Bytes(v) => Some(v),
+        Value::Number(_) => None,
+    }
+}
+
+fn number(data: &[u8], n: u64) -> Option<u64> {
+    match field(data, n)? {
+        Value::Number(v) => Some(v),
+        Value::Bytes(_) => None,
+    }
+}
+
+fn put_var(out: &mut Vec<u8>, mut v: u64) {
+    while v >= 128 {
+        out.push((v as u8 & 127) | 128);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+fn put_number(out: &mut Vec<u8>, field: u64, value: u64) {
+    put_var(out, field << 3);
+    put_var(out, value);
+}
+
+fn put_bytes(out: &mut Vec<u8>, field: u64, value: &[u8]) {
+    put_var(out, (field << 3) | 2);
+    put_var(out, value.len() as u64);
+    out.extend_from_slice(value);
+}
+
+/// Stops Alice's own answer to the phrase YATV took over. Without this she
+/// says «не нашла ничего подобного» / «воспроизведение не поддерживается»
+/// over the action we perform: the cancel is the same frame soundya sends.
+pub fn cancel_alice() {
+    let frame = rpc("AliceCapability", 8, &[8, 3]);
+    let address: SocketAddr = ADDRESS.parse().expect("address");
+    if let Ok(mut socket) = TcpStream::connect_timeout(&address, Duration::from_millis(500)) {
+        let _ = socket.write_all(&frame);
+        let _ = socket.shutdown(std::net::Shutdown::Write);
+    }
+}
+
+fn rpc(capability: &str, field_id: u64, method: &[u8]) -> Vec<u8> {
+    let mut remoting = Vec::new();
+    put_bytes(&mut remoting, 7, capability.as_bytes());
+    put_bytes(&mut remoting, field_id, method);
+    let mut message = Vec::new();
+    put_bytes(&mut message, 252, &remoting);
+    put_number(&mut message, 253, 210);
+    let mut frame = (message.len() as u32).to_le_bytes().to_vec();
+    frame.extend(message);
+    frame
+}
+
+fn read_frames(
+    socket: &mut TcpStream,
+    tx: &Sender<Cmd>,
+    seen: &mut VecDeque<Vec<u8>>,
+) -> io::Result<()> {
+    let mut data = Vec::new();
+    loop {
+        let mut len = [0u8; 4];
+        socket.read_exact(&mut len)?;
+        let n = u32::from_le_bytes(len) as usize;
+        if n == 0 || n > MAX_FRAME {
+            return Err(io::Error::other("bad frame"));
+        }
+        data.resize(n, 0);
+        socket.read_exact(&mut data)?;
+
+        // Alice's state frames (type 3).
+        if number(&data, 253) != Some(3) {
+            continue;
+        }
+        let Some(state) = bytes(&data, 252) else { continue };
+
+        if !matches!(number(state, 1), Some(1 | 3)) {
+            continue;
+        }
+        let Some(result) = bytes(state, 15) else { continue };
+        if number(result, 2) != Some(1) || number(result, 4) != Some(1) {
+            continue;
+        }
+        let Ok(text) = std::str::from_utf8(bytes(result, 1).unwrap_or_default()) else {
+            continue;
+        };
+        let phrase = text.trim().to_owned();
+        let request_key = bytes(state, 2).map(|b| b.to_vec()).unwrap_or_default();
+        if seen.contains(&request_key) {
+            continue;
+        }
+        if phrase.is_empty() || phrase.len() > 512 {
+            continue;
+        }
+        seen.push_back(request_key);
+        if seen.len() > 64 {
+            seen.pop_front();
+        }
+        let full = normalize(&phrase);
+        if full.is_empty() {
+            continue;
+        }
+        // A TV mentioned at the end: «… на втором этаже». The controller
+        // resolves it against the configured TV names; here we just pass it.
+        let (phrase, tv_hint) = split_tv_hint(&full);
+        if phrase.is_empty() {
+            continue;
+        }
+        let (reply_tx, _reply_rx) = std::sync::mpsc::channel();
+        let _ = tx.send(Cmd::Phrase(phrase, tv_hint, reply_tx));
+    }
+}
+
+/// Says an answer through Alice's TTS. Never blocks the controller.
+pub fn say(text: String) {
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(600));
+        if let Err(e) = speak(&text) {
+            eprintln!("say: {text:?}: {e}");
+        }
+    });
+}
+
+fn speak(text: &str) -> io::Result<()> {
+    let address: SocketAddr = ADDRESS.parse().expect("address");
+    let mut socket = TcpStream::connect_timeout(&address, Duration::from_secs(1))?;
+    socket.set_read_timeout(Some(Duration::from_secs(15)))?;
+
+    let mut directive = Vec::new();
+    put_bytes(&mut directive, 1, text.as_bytes());
+    put_number(&mut directive, 2, 1);
+    let mut method = Vec::new();
+    put_number(&mut method, 1, 18); // START_VOCALIZE
+    put_number(&mut method, 3, 1); // send events
+    put_bytes(&mut method, 13, &directive);
+    let mut subscribe = Vec::new();
+    put_bytes(&mut subscribe, 1, b"AliceCapability");
+
+    let mut frames = rpc("AliceCapability", 20, &subscribe);
+    frames.extend(rpc("AliceCapability", 8, &method));
+    socket.write_all(&frames)?;
+
+    socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let started = std::time::Instant::now();
+    let mut data = Vec::new();
+    while started.elapsed() < Duration::from_secs(10) {
+        let mut len = [0u8; 4];
+        match socket.read_exact(&mut len) {
+            Ok(()) => {}
+            Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+        let n = u32::from_le_bytes(len) as usize;
+        if n == 0 || n > MAX_FRAME {
+            return Ok(());
+        }
+        data.resize(n, 0);
+        socket.read_exact(&mut data)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn splits_a_tv_hint() {
+        assert_eq!(
+            split_tv_hint("найди фильм колобок на втором этаже"),
+            ("найди фильм колобок".into(), "на втором этаже".into())
+        );
+        assert_eq!(
+            split_tv_hint("найди фильм колобок"),
+            ("найди фильм колобок".into(), String::new())
+        );
+    }
+
+    #[test]
+    fn parses_a_recognized_phrase_frame() {
+        // The wire shape soundya::recognized() uses:
+        // state{1:1, 2:"request", 15:{1:"text", 2:1, 4:1}}
+        let phrase = "найди фильм колобок на делюкс";
+        let mut result = Vec::new();
+        put_bytes(&mut result, 1, phrase.as_bytes());
+        put_number(&mut result, 2, 1);
+        put_number(&mut result, 4, 1);
+        let mut state = Vec::new();
+        put_number(&mut state, 1, 1);
+        put_bytes(&mut state, 2, b"request-id");
+        put_bytes(&mut state, 15, &result);
+        let mut message = Vec::new();
+        put_bytes(&mut message, 252, &state);
+        put_number(&mut message, 253, 3);
+
+        assert_eq!(number(&message, 253), Some(3));
+        let st = bytes(&message, 252).unwrap();
+        assert_eq!(number(st, 1), Some(1));
+        let r = bytes(st, 15).unwrap();
+        assert_eq!(number(r, 2), Some(1));
+        assert_eq!(number(r, 4), Some(1));
+        assert_eq!(bytes(r, 1), Some(phrase.as_bytes()));
+        assert_eq!(bytes(st, 2), Some(&b"request-id"[..]));
+    }
+}
