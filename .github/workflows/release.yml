@@ -37,7 +37,8 @@ jobs:
           for f in run.sh yatv.env S99yatv install.sh; do sed -i 's/\r$//' "dist/yatv-aarch64/$f"; done
           chmod 755 dist/yatv-aarch64/yatv dist/yatv-aarch64/run.sh dist/yatv-aarch64/S99yatv dist/yatv-aarch64/install.sh
           cp dist/yatv/VERSION dist/yatv-aarch64/VERSION
-          (cd dist && tar -cf yatv-aarch64.tar yatv-aarch64)
+          mkdir -p dist/aarch64-pkg/yatv && cp -a dist/yatv-aarch64/. dist/aarch64-pkg/yatv/
+          (cd dist/aarch64-pkg && tar -cf ../yatv-aarch64.tar yatv)
 
       - name: Add install.sh to ARMv7 package
         run: |
