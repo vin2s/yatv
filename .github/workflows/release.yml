@@ -47,6 +47,15 @@ jobs:
           chmod 755 dist/yatv/install.sh
           (cd dist && tar -cf yatv-armv7.tar yatv)
 
+      - name: Release notes for this tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ -f "releasenotes/${TAG}.md" ]; then
+            cp "releasenotes/${TAG}.md" RELEASE_BODY.md
+          else
+            { echo "## YATV ${TAG}"; echo; echo "Обновление YATV. Подробности — в CHANGELOG.md репозитория."; } > RELEASE_BODY.md
+          fi
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -54,4 +63,4 @@ jobs:
             dist/yatv-armv7.tar
             dist/yatv-aarch64.tar
           generate_release_notes: false
-          body_path: CHANGELOG.md
+          body_path: RELEASE_BODY.md
