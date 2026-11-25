@@ -33,6 +33,8 @@ pub struct Release {
     pub version: String,
     pub notes: String,
     pub url: String,
+    /// api.github.com asset URL — same trusted host as the version check.
+    pub api_url: String,
     pub size: u64,
     pub digest: String,
 }
@@ -92,23 +94,34 @@ impl Updates {
 
     pub fn check(&self) -> Result<Option<Release>, String> {
         *self.checked.lock().unwrap() = Some(Instant::now());
-        match fetch_latest() {
+        let (version, notes, api_url) = match fetch_latest() {
             Ok((version, notes)) => {
-                *self.error.lock().unwrap() = None;
-                let rel = Release {
-                    version: version.clone(), notes,
-                    url: format!("{DOWNLOAD}/v{version}/{}", asset()),
-                    size: 0, digest: String::new(),
-                };
-                *self.latest.lock().unwrap() = Some(rel.clone());
-                Ok(newer(&version, crate::VERSION).then_some(rel))
+                // The asset's API URL uses api.github.com (trusted by webpki),
+                // unlike the browser_download_url redirect to objects.githubusercontent.com.
+                let api = crate::google::agent().ok().and_then(|a| {
+                    a.get(RELEASES).set("User-Agent", "yatv").timeout(Duration::from_secs(15)).call().ok()
+                }).and_then(|r| r.into_json().ok()).and_then(|v: Value| {
+                    v.get("assets")?.as_array()?.iter().find(|a| {
+                        a.get("name").and_then(Value::as_str) == Some(asset())
+                    })?.get("url").and_then(Value::as_str).map(str::to_owned)
+                }).unwrap_or_default();
+                (version, notes, api)
             }
             Err(e) => {
                 eprintln!("update: cannot check: {e}");
                 *self.error.lock().unwrap() = Some(e.clone());
-                Err(e)
+                return Err(e);
             }
-        }
+        };
+        *self.error.lock().unwrap() = None;
+        let rel = Release {
+            version: version.clone(), notes,
+            url: format!("{DOWNLOAD}/v{version}/{}", asset()),
+            api_url,
+            size: 0, digest: String::new(),
+        };
+        *self.latest.lock().unwrap() = Some(rel.clone());
+        Ok(newer(&version, crate::VERSION).then_some(rel))
     }
 
     pub fn json(&self) -> Value {
@@ -145,22 +158,52 @@ impl Updates {
 
     fn install_inner(&self) -> Result<String, String> {
         let version = match self.check()? {
-            Some(r) => r.version,
+            Some(r) => r,
             None => return Err(format!("уже стоит последняя версия {}", crate::VERSION)),
         };
-        self.set_state(&format!("скачиваю {version}…"));
-        let url = format!("{DOWNLOAD}/v{version}/{}", asset());
-        // wget on the speaker; no TLS library issues, follows redirects.
-        let out = Command::new("wget")
-            .args(["-q", "-O", TAR, "-T", "30", &url])
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("wget: {e}"))?;
-        if !out.status.success() {
-            let _ = std::fs::remove_file(TAR);
-            return Err(format!("не скачалось {}: {}", url, String::from_utf8_lossy(&out.stderr).trim()));
+        self.set_state(&format!("скачиваю {}…", version.version));
+        let ver = version.version.clone();
+        let browser_url = format!("{DOWNLOAD}/v{ver}/{}", asset());
+        // The speaker's wget has an old CA bundle (BusyBox has no HTTPS at all).
+        // ureq carries webpki roots; download via api.github.com first (same
+        // trusted host as the version check), then the browser URL, then wget.
+        let downloaded = (|| -> Result<(), String> {
+            let agent = crate::google::agent().map_err(|e| e.to_string())?;
+            let mut last = String::new();
+            for (u, api) in [(&version.api_url, true), (&browser_url, false)] {
+                if u.is_empty() { continue; }
+                let mut req = agent.get(u).timeout(Duration::from_secs(60));
+                if api { req = req.set("Accept", "application/octet-stream").set("User-Agent", "yatv"); }
+                match req.call() {
+                    Ok(resp) => {
+                        let mut body = Vec::new();
+                        resp.into_reader().read_to_end(&mut body).map_err(|e| e.to_string())?;
+                        if body.len() < 1000 { last = "пустой ответ".into(); continue; }
+                        std::fs::write(TAR, &body).map_err(|e| e.to_string())?;
+                        return Ok(());
+                    }
+                    Err(e) => last = format!("ureq: {e}"),
+                }
+            }
+            Err(last)
+        })();
+        if let Err(e) = downloaded {
+            eprintln!("update: ureq download failed: {e}; trying wget");
+            let out = Command::new("wget")
+                .args(["-q", "--no-check-certificate", "-O", TAR, "-T", "60", &browser_url])
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| format!("wget: {e}"))?;
+            if !out.status.success() {
+                let _ = std::fs::remove_file(TAR);
+                return Err(format!("не скачалось {}: {}", browser_url, String::from_utf8_lossy(&out.stderr).trim()));
+            }
         }
-        self.set_state(&format!("устанавливаю {version}…"));
+        if !crate::fsx::read_bytes(Path::new(TAR)).map(|b| b.len() > 1000).unwrap_or(false) {
+            let _ = std::fs::remove_file(TAR);
+            return Err("архив скачался пустым".into());
+        }
+        self.set_state(&format!("устанавливаю {ver}…"));
         // Unpack and run the installer in its own session: it stops yatv
         // (this process) and starts the new one. The pause lets this answer
         // reach the page first.
@@ -175,14 +218,14 @@ impl Updates {
         }
         // If this process is still alive long after, the installer stopped
         // before restarting yatv; report it instead of «installing…» forever.
-        let version2 = version.clone();
+        let version2 = ver.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(240));
             let tail = crate::fsx::read_string(Path::new(LOG)).unwrap_or_default();
             let tail: String = tail.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" / ");
             eprintln!("update: installer for {version2} did not finish in 240 s: {tail}");
         });
-        Ok(format!("Устанавливаю yatv {version}. Через минуту вернусь"))
+        Ok(format!("Устанавливаю yatv {ver}. Через минуту вернусь"))
     }
 }
 
