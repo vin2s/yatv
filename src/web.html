@@ -275,6 +275,18 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
 </div>
 </div><!-- /tab-brief -->
 
+<h2>Обновление YATV</h2>
+<div class="card">
+  <p class="hint" id="updstate">Проверка версии…</p>
+  <div class="row">
+    <button class="ghost" onclick="updateAction('check')">Проверить</button>
+    <button onclick="updateAction('install')">Установить обновление</button>
+  </div>
+  <label class="switch"><input type="checkbox" id="update_auto" checked onchange="saveUpdateAuto()"><span><b>Обновляться автоматически</b>
+    <small>Другие колонки получат уведомление и поставят новую версию сами.</small></span></label>
+  <div class="msg" id="updmsg"></div>
+</div>
+
 <h2>Журнал (последние 200, с отладкой)</h2>
 <div class="card">
   <div class="row"><button class="ghost" onclick="loadJournal()">Обновить</button><button class="danger" onclick="clearJournal()">Очистить</button></div>
@@ -698,7 +710,7 @@ async function load() {
       state.appsByHost[t.host] = j;
     } catch (e) { state.appsByHost[t.host] = { apps: [], names: {} }; }
   }
-  renderTvs(); renderPhrases(); loadPlans(); loadJournal();
+  renderTvs(); renderPhrases(); loadPlans(); loadJournal(); loadUpdate();
 }
 function appSelect(value, host) {
   const cached = (host && state.appsByHost[host]) || { apps: [], names: {} };
@@ -764,6 +776,24 @@ async function saveAll() {
   const r = await postJSON('/api/settings', { tvs, phrases });
   show('tvmsg', r, r.startsWith('error')); show('phrasemsg', r, r.startsWith('error'));
   await load();
+}
+async function updateAction(what) {
+  show('updmsg', what === 'check' ? 'Проверяю…' : 'Устанавливаю…');
+  const r = await post('/api/update', what);
+  show('updmsg', r, r.startsWith('error'));
+  loadUpdate();
+}
+async function saveUpdateAuto() {
+  await postJSON('/api/settings', { update_auto: $('update_auto').checked });
+}
+function loadUpdate() {
+  const u = (settings.update || {});
+  $('update_auto').checked = settings.update_auto !== false;
+  if (u.installing) { $('updstate').textContent = 'Идёт установка обновления…'; return; }
+  if (u.error) { $('updstate').textContent = 'Ошибка: ' + u.error; return; }
+  $('updstate').textContent = u.available
+    ? 'Доступна версия ' + u.latest + ' (сейчас ' + u.current + '). Нажмите «Установить обновление»'
+    : 'Версия ' + u.current + ' — актуальна.' + (u.state ? ' ' + u.state : '');
 }
 async function loadJournal() {
   const j = await (await fetch('/api/status')).json();

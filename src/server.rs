@@ -109,6 +109,18 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
                 }
             }
         }
+        ("POST", "/api/update") => {
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            let command = body.trim().to_owned();
+            if tx.send(Cmd::Update(command, reply_tx)).is_err() {
+                ("500 Internal Server Error", "text/plain", "controller stopped".to_owned())
+            } else {
+                match reply_rx.recv_timeout(std::time::Duration::from_secs(40)) {
+                    Ok(answer) => ("200 OK", "text/plain; charset=utf-8", answer),
+                    Err(_) => ("504 Gateway Timeout", "text/plain", "update did not answer".to_owned()),
+                }
+            }
+        }
         ("POST", "/api/cmd") => {
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             let command = body.trim().to_owned();
@@ -153,6 +165,8 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
                 "g_key_saved": settings.extra.get("g_client_secret").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()),
                 "tz_offset": settings.extra.get("tz_offset").and_then(|v| v.as_i64()),
                 "planner": crate::planner::json(),
+                "update": crate::updates().json(),
+                "update_auto": settings.extra.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(true),
                 
                 "journal": crate::log::latest(&crate::state_dir()),
             });

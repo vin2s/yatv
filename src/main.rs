@@ -19,11 +19,18 @@ mod settings;
 mod sha256;
 mod voice;
 mod tv;
+mod update;
 
 use std::{path::PathBuf, sync::mpsc::{self, Receiver, Sender}, thread, time::Duration};
 
-pub const VERSION: &str = "0.1.0";
+pub const VERSION: &str = "0.2.0";
 pub const DEFAULT_PORT: u16 = 8766;
+
+/// Shared update checker (the panel and the background watcher use it).
+static UPDATES: std::sync::OnceLock<update::Updates> = std::sync::OnceLock::new();
+fn updates() -> &'static update::Updates {
+    UPDATES.get_or_init(update::Updates::default)
+}
 
 /// What the controller thread is asked to do.
 #[derive(Debug, Clone)]
@@ -37,6 +44,8 @@ pub enum Cmd {
     Plan(String, Sender<String>),
     /// Settings changed (TV host, aliases, …).
     Settings(serde_json::Value, Sender<String>),
+    /// Update check/install from the panel or the background watcher.
+    Update(String, Sender<String>),
     /// Stop the daemon.
     Stop,
 }
@@ -76,6 +85,30 @@ fn main() {
     // The panel and the HTTP API: same parser, same TV actions.
     server::serve(port, tx.clone());
 
+    // Check GitHub for a newer release; if auto is on, install it silently.
+    thread::spawn(|| {
+        let u = updates();
+        loop {
+            if u.due() {
+                match u.check() {
+                    Ok(Some(rel)) => {
+                        log::add(&crate::state_dir(), "info", &format!("доступно обновление {}: будет установлено", rel.version));
+                        // Auto-install is on by default; the panel can turn it off.
+                        let s = settings::Settings::load(&crate::state_dir());
+                        if s.extra.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(true) {
+                            if let Err(e) = u.install() {
+                                eprintln!("update: auto install failed: {e}");
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("update: auto check failed: {e}"),
+                }
+            }
+            thread::sleep(Duration::from_secs(1800));
+        }
+    });
+
     controller(dir, rx);
 }
 
@@ -83,6 +116,22 @@ fn controller(dir: PathBuf, rx: Receiver<Cmd>) {
     while let Ok(cmd) = rx.recv() {
         match cmd {
             Cmd::Stop => break,
+            Cmd::Update(what, reply) => {
+                let answer = match what.as_str() {
+                    "check" => match updates().check() {
+                        Ok(Some(r)) => format!("OK: доступна версия {} — {}", r.version, if r.notes.is_empty() { "обновление" } else { &r.notes }),
+                        Ok(None) => format!("OK: последняя версия {}", VERSION),
+                        Err(e) => format!("error: {e}"),
+                    },
+                    "json" => updates().json().to_string(),
+                    "install" => match updates().install() {
+                        Ok(s) => format!("OK: {s}"),
+                        Err(e) => format!("error: {e}"),
+                    },
+                    _ => "usage: update check|json|install".into(),
+                };
+                let _ = reply.send(answer);
+            }
             Cmd::Settings(patch, reply) => {
                 // Google client id/secret are secrets in the journal: log only presence.
                 let g_id = patch.get("g_client_id").and_then(|v| v.as_str()).unwrap_or("");

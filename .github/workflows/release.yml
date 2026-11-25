@@ -1,0 +1,55 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-unknown-linux-gnueabihf, aarch64-unknown-linux-musl
+
+      - name: Install cross compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build ARMv7
+        run: sh scripts/build-arm.sh
+
+      - name: Build aarch64
+        run: |
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc \
+            cargo build --release --target aarch64-unknown-linux-musl
+          mkdir -p dist/yatv-aarch64
+          cp target/aarch64-unknown-linux-musl/release/yatv dist/yatv-aarch64/yatv
+          cp packaging/run.sh packaging/yatv.env packaging/S99yatv packaging/install.sh dist/yatv-aarch64/
+          for f in run.sh yatv.env S99yatv install.sh; do sed -i 's/\r$//' "dist/yatv-aarch64/$f"; done
+          chmod 755 dist/yatv-aarch64/yatv dist/yatv-aarch64/run.sh dist/yatv-aarch64/S99yatv dist/yatv-aarch64/install.sh
+          cp dist/yatv/VERSION dist/yatv-aarch64/VERSION
+          (cd dist && tar -cf yatv-aarch64.tar yatv-aarch64)
+
+      - name: Add install.sh to ARMv7 package
+        run: |
+          cp packaging/install.sh dist/yatv/install.sh
+          sed -i 's/\r$//' dist/yatv/install.sh
+          chmod 755 dist/yatv/install.sh
+          (cd dist && tar -cf yatv-armv7.tar yatv)
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/yatv-armv7.tar
+            dist/yatv-aarch64.tar
+          generate_release_notes: true
