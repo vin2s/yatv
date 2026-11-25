@@ -8,6 +8,12 @@ use std::time::Duration;
 use crate::{planner, settings::Settings, voice};
 
 /// The feeds offered in the panel: key, name, address.
+pub fn is_active() -> bool {
+    std::sync::atomic::AtomicBool::load(&RUNNING, std::sync::atomic::Ordering::Acquire)
+}
+
+static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// A generation counter instead of stop files: «стоп» bumps the generation,
 /// the running brief sees its own generation is over and quits. A new brief
 /// takes the fresh generation, so an old leftover stop can never kill it.
@@ -17,7 +23,6 @@ static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 pub fn request_stop() -> bool {
     let before = GENERATION.load(std::sync::atomic::Ordering::Acquire);
     GENERATION.store(before + 1, std::sync::atomic::Ordering::Release);
-    voice::cancel_alice();
     before > 0
 }
 
@@ -288,6 +293,7 @@ pub fn weather(provider: &str, lat: f64, lon: f64, custom_url: &str) -> Result<s
 pub fn run(s: &Settings) -> Vec<String> {
     // A new brief ends any previous one: only one brief speaks at a time.
     let my_gen = GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+    RUNNING.store(true, std::sync::atomic::Ordering::Release);
     let mut said = Vec::new();
     crate::log::add(&crate::state_dir(), "info", "сводка: началась");
     let result = run_inner(s, my_gen, &mut said);
@@ -295,6 +301,7 @@ pub fn run(s: &Settings) -> Vec<String> {
         eprintln!("brief: {e}");
         crate::log::add(&crate::state_dir(), "error", &format!("сводка: {e}"));
     }
+    RUNNING.store(false, std::sync::atomic::Ordering::Release);
     if current_generation() == my_gen {
         crate::log::add(&crate::state_dir(), "info", &format!("сводка: сказано {} фраз", said.len()));
     }

@@ -115,15 +115,20 @@ fn controller(dir: PathBuf, rx: Receiver<Cmd>) {
                 // Full trace: every phrase from Alice/the panel, with the TV
                 // hint, so a wrong capture can be diagnosed from the journal.
                 log::add(&dir, "heard", &format!("{phrase:?} hint={tv_hint:?}"));
-                // «Стоп» while the brief is running stops it instead of Alice.
+                // «Стоп» belongs to Alice unless our brief is actually speaking.
+                // When it is, we end our own reading — otherwise we must NOT
+                // cancel her: her backend is what stops her own music.
                 let said_text = planner_text(&phrase);
                 if ["стоп", "стоп сводка", "останови сводку", "хватит"].contains(&said_text.as_str()) {
-                    voice::cancel_alice();
-                    if brief::request_stop() {
+                    if brief::is_active() {
+                        brief::request_stop();
+                        log::add(&dir, "info", "сводка: остановлена фразой «стоп»");
                         let _ = reply.send("OK: сводка остановлена".to_owned());
-                    } else {
-                        let _ = reply.send("OK".to_owned());
+                        continue;
                     }
+                    // No brief: leave it entirely to Alice and do not cancel her.
+                    log::add(&dir, "skip", &phrase);
+                    let _ = reply.send("Не команда ТВ".to_owned());
                     continue;
                 }
                 // The brief runs only on the phrase the owner typed in the panel.
