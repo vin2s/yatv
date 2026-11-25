@@ -133,7 +133,7 @@ pub fn parse(text: &str) -> Option<TvAction> {
     }
 
     // 1. A film search: the noun is required, exactly like yatv.
-    let after = ["найди ", "поищи ", "покажи "]
+    let after = ["найди ", "найти ", "поищи ", "поискать ", "покажи ", "показывай "]
         .iter()
         .find_map(|v| n.strip_prefix(v))?;
     let nouns = ["фильм ", "сериал ", "мультфильм ", "мультик ", "видео ", "ролик ", "кино "];

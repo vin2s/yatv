@@ -5,20 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>YATV — управление телевизором</title>
 <style>
-:root { color-scheme: dark; --bg:#141414; --card:#1e1e1e; --ink:#f2f2f2; --dim:#aaa; --line:#333; --accent:#ffd54a; }
+:root { color-scheme: dark; --bg:#141414; --card:#1e1e1e; --ink:#f2f2f2; --dim:#aaa; --line:#333; --accent:#ffd54a; --btn:#ffd54a; --btnink:#1a1a1a; --field:#272727; --danger:#ff8a80; --dangerline:#5a2a2a; --heard:#8bc34a; }
+:root.light { color-scheme: light; --bg:#f4f5f7; --card:#fff; --ink:#1d1f22; --dim:#666; --line:#dcdfe3; --accent:#2e7d32; --btn:#a5d6a7; --btnink:#1a1a1a; --field:#f0f1f3; --danger:#c62828; --dangerline:#e0b4b4; --heard:#2e7d32; }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui,sans-serif; }
 .wrap { max-width:900px; margin:0 auto; padding:22px 16px 60px; }
+.topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
 h1 { font-size:24px; margin:0 0 2px; }
+.brand-ya { color:#e53935; }
+.brand-tv { color:#000; }
+:root:not(.light) .brand-tv { color:#f2f2f2; }
 h1 small { font-size:13px; color:var(--dim); font-weight:normal; }
+.tabs { display:flex; gap:6px; border-bottom:1px solid var(--line); margin:12px 0 18px; }
+.tabs button { background:transparent; color:var(--dim); border:0; border-bottom:2px solid transparent; border-radius:0; padding:10px 18px; font-size:16px; }
+.tabs button.on { color:var(--ink); border-bottom-color:var(--accent); }
+.theme { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.theme button { background:transparent; color:var(--dim); border:0; border-radius:0; padding:6px 10px; font-size:13px; }
+.theme button.on { background:var(--btn); color:var(--btnink); }
 h2 { font-size:17px; margin:26px 0 10px; border-bottom:1px solid var(--line); padding-bottom:6px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:10px 0; }
 label { display:block; margin:8px 0 4px; color:var(--dim); font-size:13px; }
-input, select, textarea, button { font:inherit; color:var(--ink); background:#272727; border:1px solid var(--line); border-radius:8px; padding:9px 11px; }
+input, select, textarea, button { font:inherit; color:var(--ink); background:var(--field); border:1px solid var(--line); border-radius:8px; padding:9px 11px; }
 input, select, textarea { width:100%; }
-button { cursor:pointer; width:auto; background:var(--accent); color:#1a1a1a; border:0; font-weight:600; }
+button { cursor:pointer; width:auto; background:var(--btn); color:var(--btnink); border:0; font-weight:600; }
 button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
-button.danger { background:transparent; color:#ff8a80; border:1px solid #5a2a2a; }
+button.danger { background:transparent; color:var(--danger); border:1px solid var(--dangerline); }
 .row { display:flex; gap:8px; align-items:end; flex-wrap:wrap; }
 .row > * { flex:1 1 160px; }
 .row button { flex:none; }
@@ -26,14 +37,73 @@ button.danger { background:transparent; color:#ff8a80; border:1px solid #5a2a2a;
 .msg { min-height:20px; margin:8px 0; color:var(--accent); font-size:14px; }
 .msg.error { color:#ff8a80; }
 .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; }
-.grid button { width:100%; background:#272727; color:var(--ink); border:1px solid var(--line); }
-code { background:#000; padding:1px 5px; border-radius:4px; }
+.grid button { width:100%; background:var(--field); color:var(--ink); border:1px solid var(--line); }
+code { background:var(--field); padding:1px 5px; border-radius:4px; }
+.planlist { list-style:none; margin:8px 0; padding:0; }
+.planlist li { display:flex; gap:10px; align-items:flex-start; padding:10px 6px; border-bottom:1px solid var(--line); }
+.planlist li:last-child { border-bottom:0; }
+.planlist li > input[type=checkbox] { width:18px; height:18px; flex:none; margin-top:2px; }
+.planlist .pt { flex:1; min-width:0; }
+.planlist .pt b { font-weight:600; display:block; overflow-wrap:anywhere; }
+.planlist .edit-task { width:100%; padding:4px 6px; font-size:14px; }
+.planlist .kinddot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); margin-right:6px; vertical-align:middle; }
+.planlist .kinddot.task { background:#7ec8ff; }
+.planlist .kinddot.reminder { background:#8bd694; }
+.planlist .kinddot.event { background:var(--accent); }
+.planlist small { color:var(--dim); display:block; margin-top:2px; font-size:12px; overflow-wrap:anywhere; }
+.planlist .late b { color:#ff8a80; }
+.planlist button { padding:4px 8px; font-size:13px; flex:none; }
+.daytext { color:var(--dim); font-size:13px; margin:4px 0 8px; line-height:1.5; }
+.seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; margin:8px 0; }
+.seg button { background:transparent; color:var(--dim); border:0; border-radius:0; padding:7px 12px; }
+.seg button.on { background:var(--btn); color:var(--btnink); }
+#tab-plans button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
+.calhead { display:flex; align-items:center; justify-content:space-between; margin:8px 0; }
+.calgrid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+.calgrid .wd { color:var(--dim); font-size:12px; text-align:center; padding:4px 0; }
+.calday { position:relative; min-height:52px; padding:5px 4px; background:var(--field); border:1px solid var(--line); border-radius:7px; cursor:pointer; text-align:left; color:var(--ink); }
+.calday.other { opacity:.35; }
+.calday.today { border-color:var(--accent); }
+.calday b { font-size:12px; font-weight:600; }
+.calday .dots { position:absolute; left:5px; bottom:5px; display:flex; gap:3px; flex-wrap:wrap; }
+.calday .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); }
+.calday .dot.task { background:#7ec8ff; }
+.calday .dot.reminder { background:#8bd694; }
+.calday.sel { background:var(--line); }
+.calday:hover { border-color:var(--accent); }
+.calevents { margin:10px 0 0; }
+.calevents h3 { font-size:14px; margin:6px 0; }
+.orderrow { display:flex; gap:8px; align-items:center; padding:6px 8px; margin:3px 0; border:1px solid var(--line); border-radius:8px; background:var(--field); cursor:grab; }
+.orderrow.dragging { opacity:.4; }
+.orderrow .grip { color:var(--dim); font-size:16px; letter-spacing:1px; user-select:none; }
+.orderrow span { flex:1; }
+.switch { display:flex; gap:8px; align-items:center; margin:8px 0; }
+.switch input { width:auto; }
+.psect { margin:12px 0; border-top:1px solid var(--line); padding-top:8px; }
+.psect summary { cursor:pointer; color:var(--dim); }
+.chip { color:var(--accent); font-size:12px; }
+.logheard { color:var(--heard); }
+.logerror { color:var(--danger); }
+.logline { line-height:1.7; }
+.logday { display:block; text-align:center; color:var(--dim); border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:4px 0; margin:6px 0; font-size:12px; }
+#log { margin:8px 0 0; }
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>YATV <small id="version"></small></small></h1>
-<p class="hint">Автономный контроллер телевизора: свой порт, свой ADB-ключ, свой голос.</p>
+<div class="topbar">
+  <h1><span class="brand-ya">YA</span><span class="brand-tv">TV</span> <small id="version"></small></small></h1>
+  <div class="theme" id="theme">
+    <button data-t="dark" onclick="setTheme('dark')" title="Ночь" aria-label="Ночь">🌙</button>
+    <button data-t="light" class="on" onclick="setTheme('light')" title="День" aria-label="День">☀️</button>
+  </div>
+</div>
+<div class="tabs" id="toptabs">
+  <button data-tab="tv" class="on" onclick="setTab('tv')">ТВ</button>
+  <button data-tab="plans" onclick="setTab('plans')">Планы</button>
+  <button data-tab="brief" onclick="setTab('brief')">Сводка</button>
+</div>
+<div id="tab-tv">
 
 <h2>Телевизоры</h2>
 <div class="card">
@@ -55,45 +125,182 @@ code { background:#000; padding:1px 5px; border-radius:4px; }
     <button onclick="saveAll()">Сохранить всё</button>
   </div>
   <div class="msg" id="phrasemsg"></div>
+  <div class="psect" style="margin-top:12px; padding-top:12px">
+    <label>Проверить фразу — тот же разбор, что и у голосовой</label>
+    <div class="row">
+      <input id="phrase" placeholder="найди фильм колобок на втором этаже">
+      <button onclick="runPhrase()">Выполнить</button>
+    </div>
+    <div class="msg" id="cmdmsg"></div>
+  </div>
 </div>
 
-<h2>Проверить фразу</h2>
+</div><!-- /tab-tv -->
+
+<div id="tab-plans" hidden>
+<h2>Планы</h2>
 <div class="card">
+  <p class="hint">Голосом: «добавь задачу сдать отчёт завтра до 18:00», «какие у меня сегодня планы», «что мне нужно сделать», «что дальше», «отметь выполненной …». Фразы «напомни…» остаются штатной Алисе — её напоминания приходят на все колонки сразу. Остальные фразы — тоже Алисе.</p>
   <div class="row">
-    <input id="phrase" placeholder="найди фильм колобок на втором этаже">
-    <button onclick="runPhrase()">Выполнить</button>
+    <button class="ghost" onclick="loadPlans()">Обновить</button>
+    <button class="ghost" id="planspeak" onclick="planCmd('speak ' + planView)">Сказать вслух</button>
   </div>
-  <p class="hint">Тот же разбор, что и у голосовой фразы.</p>
-  <div class="msg" id="cmdmsg"></div>
-</div>
+  <div class="seg" id="planview">
+    <button data-v="today" class="on" onclick="setPlanView('today')">Сегодня</button>
+    <button data-v="tomorrow" onclick="setPlanView('tomorrow')">Завтра</button>
+    <button data-v="week" onclick="setPlanView('week')">Неделя</button>
+  </div>
+  <div class="seg" id="planmode">
+    <button data-m="list" class="on" onclick="setPlanMode('list')">Список</button>
+    <button data-m="cal" onclick="setPlanMode('cal')">Календарь</button>
+  </div>
+  <p class="daytext" id="plansum">…</p>
+  <div id="planlistbox">
+    <ul class="planlist" id="planlist"></ul>
+  </div>
+  <div id="plancalbox" hidden>
+    <div class="calhead">
+      <button class="ghost" onclick="calShift(-1)">‹</button>
+      <b id="caltitle"></b>
+      <button class="ghost" onclick="calShift(1)">›</button>
+    </div>
+    <div class="calgrid" id="calgrid"></div>
+    <div class="calevents" id="calevents"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <input id="plantitle" placeholder="Новая задача, срок можно словами: завтра в 9" onkeydown="if(event.key==='Enter')planAdd()">
+    <input id="planwhen" placeholder="завтра в 9 (необязательно)" style="flex:0 1 190px">
+    <button onclick="planAdd()">Добавить</button>
+  </div>
+  <p class="hint">В поле срока можно написать «через 20 минут», «завтра в 15:00», «12 марта в 10» — или оставить пустым.</p>
+  <div class="msg" id="planmsg"></div>
+  <details><summary>Выполненные</summary><ul class="planlist" id="plandone"></ul></details>
 
-<h2>Пульт</h2>
-<div class="card">
-  <div class="grid">
-    <button onclick="cmd('tv key up')">↑ Вверх</button>
-    <button onclick="cmd('tv key center')">ОК</button>
-    <button onclick="cmd('tv key down')">↓ Вниз</button>
-    <button onclick="cmd('tv key left')">← Лево</button>
-    <button onclick="cmd('tv key back')">Назад</button>
-    <button onclick="cmd('tv key right')">→ Право</button>
-    <button onclick="cmd('tv key play')">▶‖</button>
-    <button onclick="cmd('tv key home')">Домой</button>
-    <button onclick="cmd('tv key volume_up')">＋ Громче</button>
-    <button onclick="cmd('tv key volume_down')">− Тише</button>
-  </div>
-  <div class="msg" id=" remotemsg"></div>
+  <details class="psect"><summary>Настройки планировщика</summary>
+    <label class="switch"><input type="checkbox" id="planon" checked onchange="savePlannerSettings()"><span><b>Планировщик включён</b></span></label>
+    <p class="hint">«Добавь задачу…», «какие планы…» идут сюда. Фразы «напомни…» остаются штатной Алисе — они приходят на все колонки сразу. «Доброе утро» тоже Алисе.</p>
+    <label>Предупреждать о сроке
+      <select id="planwarn"><option value="0">Не предупреждать</option><option value="10">За 10 минут</option>
+        <option value="15">За 15 минут</option><option value="30">За 30 минут</option><option value="60">За час</option></select>
+    </label>
+    <label>Если у задачи только дата, срок —
+      <select id="plandue"><option value="720">в 12:00</option><option value="900">в 15:00</option>
+        <option value="1080">в 18:00</option><option value="1200">в 20:00</option><option value="1440">без времени</option></select>
+    </label>
+    <label class="switch"><input type="checkbox" id="briefon" onchange="savePlannerSettings()"><span><b>Сводка по времени</b>
+      <small>Каждый день в выбранное время.</small></span></label>
+    <div class="row">
+      <input type="time" id="briefat" value="08:00">
+      <select id="briefdays"><option value="all">Каждый день</option><option value="weekdays">По будням</option></select>
+    </div>
+    <div class="row" style="margin-top:8px"><button onclick="savePlannerSettings()">Сохранить</button></div>
+    <div class="msg" id="plansetmsg"></div>
+  </details>
+
+  <details class="psect"><summary>Google Календарь и Задачи</summary>
+    <p class="hint" id="gstate">Задачи и события в обе стороны: колонка читает их, добавляет новые голосом и отмечает выполненные. Нужен свой бесплатный ключ Google — это один раз, минут за 10.</p>
+    <div id="gon" hidden>
+      <label class="switch"><input type="checkbox" id="guse" onchange="saveGoogle()"><span><b>Использовать Google</b></span></label>
+      <h3>Какие календари читать</h3>
+      <div id="gcals"></div>
+      <label>Новые события — в календарь<select id="gwrite"></select></label>
+      <label>Новые задачи — в список<select id="glist"></select></label>
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" onclick="planCmd('calendar')">Обновить сейчас</button>
+        <button onclick="saveGoogle()">Сохранить</button>
+      </div>
+    </div>
+    <div id="goff">
+      <ol>
+        <li><b>Ключ Google.</b> Создайте проект в <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud</a>, включите <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener">Calendar API</a> и <a href="https://console.cloud.google.com/apis/library/tasks.googleapis.com" target="_blank" rel="noopener">Tasks API</a>. В <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">экране согласия</a> выберите External и «Publish app», иначе Google будет отзывать вход через 7 дней. Создайте клиента типа <b>Desktop app</b>, скачайте JSON и выберите его здесь:<br>
+          <input type="file" id="gfile" accept=".json,application/json" onchange="googleKeyFile(this)">
+        </li>
+        <li><b>Войти в Google</b> — откроется новая вкладка, войдите и разрешите календарь и задачи:<br><button onclick="googleLogin()">Войти в Google</button>
+          <p class="hint">Или без браузера: колонка скажет короткий код, а вы введёте его на <code>google.com/device</code>:</p>
+          <button class="ghost" onclick="googleDevice()">Войти через код</button>
+          <button class="ghost" onclick="googleDevicePoll()">Проверить</button>
+        </li>
+        <li><b>Адрес из браузера.</b> Вкладка покажет «Не удаётся открыть страницу» — так и должно быть. Скопируйте адрес из адресной строки и вставьте:<br>
+          <input id="gpaste" placeholder="http://127.0.0.1:53682/yatv?code=…" onkeydown="if(event.key==='Enter')googleCode()">
+          <button onclick="googleCode()">Подключить</button>
+        </li>
+      </ol>
+      <p class="hint">Или введите ID и секрет вручную: <input id="gid" placeholder="Client ID"> <input id="gsecret" type="password" placeholder="Client secret"> <button onclick="saveGoogleClient()">Сохранить ключ</button></p>
+    <div class="msg" id="gmsg"></div>
+    </div>
+  </details>
 </div>
+</div><!-- /tab-plans -->
+
+<div id="tab-brief" hidden>
+<h2>Утренняя сводка</h2>
+<div class="card">
+  <p class="hint">«Алиса, доброе утро» — колонка перехватывает фразу и рассказывает: новости из вашего источника, погоду, планы на день, затем включает вашу волну. Остальные фразы остаются Алисе.</p>
+  <div class="row">
+    <button class="ghost" onclick="loadBrief()">Обновить</button>
+    <button onclick="planCmd('brief test')">Проверить сейчас</button>
+  </div>
+  <p class="hint">«Доброе утро» по умолчанию остаётся Алисе. Напишите свою фразу — только она будет запускать сводку: новости, погода и планы на день. Можно несколько вариантов через запятую: «новости, включи новости». Скажите «стоп», чтобы прервать чтение.</p>
+  <div class="row">
+    <input id="brief_trigger" placeholder="новости, включи новости">
+    <button onclick="saveBrief()">Сохранить фразу</button>
+  </div>
+  <label class="switch"><input type="checkbox" id="brief_on" onchange="saveBrief()"><span><b>Перехватывать эту фразу</b></span></label>
+  <label>Источник новостей
+    <select id="brief_news" onchange="saveBrief()"></select>
+  </label>
+  <label>Сколько новостей озвучивать (1–10)
+    <input id="brief_news_count" type="number" min="1" max="10" placeholder="5" onchange="saveBrief()">
+  </label>
+  <p class="hint">Или вставьте свою RSS-ссылку (https://…):</p>
+  <div class="row">
+    <input id="brief_news_url" placeholder="https://…/rss.xml">
+    <button onclick="saveBriefUrl()">Сохранить ссылку</button>
+  </div>
+  <label class="switch"><input type="checkbox" id="brief_weather" onchange="saveBrief()"><span><b>Погода</b></span></label>
+  <label>Источник погоды
+    <select id="brief_weather_provider" onchange="weatherProviderChanged()"></select>
+  </label>
+  <div class="row" id="brief_weather_url_row" hidden>
+    <input id="brief_weather_url" placeholder="https://…/weather.json (JSON с полем temp)">
+    <button onclick="saveBriefUrl()">Сохранить ссылку</button>
+  </div>
+  <label class="switch"><input type="checkbox" id="brief_plans" onchange="saveBrief()"><span><b>Планы на день</b></span></label>
+  <h3>Порядок в сводке</h3>
+  <p class="hint">Стрелки меняют порядок блоков. Для новостей можно задать отдельную позицию каждой — «новости» означает все сразу.</p>
+  <div id="brief-order"></div>
+  <div class="row" style="margin-top:8px"><button onclick="saveBrief()">Сохранить</button></div>
+  <div class="msg" id="briefmsg"></div>
+  <pre id="briefstate" style="white-space:pre-wrap;color:var(--dim);margin:8px 0 0"></pre>
+</div>
+</div><!-- /tab-brief -->
 
 <h2>Журнал (последние 200, с отладкой)</h2>
 <div class="card">
   <div class="row"><button class="ghost" onclick="loadJournal()">Обновить</button><button class="danger" onclick="clearJournal()">Очистить</button></div>
-  <pre id="log" style="white-space:pre-wrap;color:var(--dim);margin:8px 0 0;max-height:360px;overflow:auto"></pre>
+  <div id="log" style="color:var(--dim);margin:8px 0 0;max-height:360px;overflow:auto"></div>
 </div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
 const state = { tvs: [], phrases: [], appsByHost: {} };
 let settings = {};
+function setTheme(t) {
+  document.documentElement.classList.toggle('light', t === 'light');
+  document.querySelectorAll('#theme button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  try { localStorage.setItem('yatv-theme', t); } catch (e) {}
+}
+function setTab(tab) {
+  $('tab-tv').hidden = tab !== 'tv';
+  $('tab-plans').hidden = tab !== 'plans';
+  $('tab-brief').hidden = tab !== 'brief';
+  document.querySelectorAll('#toptabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  if (tab === 'plans') loadPlans();
+  else if (tab === 'brief') loadBrief();
+}
+let savedTheme = 'light';
+try { savedTheme = localStorage.getItem('yatv-theme') || 'light'; } catch (e) {}
+setTheme(savedTheme);
 function show(id, text, bad) { const e = $(id); if (!e) return; e.textContent = text || ''; e.className = 'msg' + (bad ? ' error' : ''); }
 function log(line) { $('log').textContent = (line + '\n' + $('log').textContent).split('\n').slice(0, 25).join('\n'); }
 async function post(path, body) { return await (await fetch(path, { method: 'POST', body })).text(); }
@@ -102,9 +309,387 @@ async function apiCmd(text) { return await post('/api/cmd', text); }
 async function cmd(text) { const r = await apiCmd(text); show('cmdmsg', r, r.startsWith('error')); log(text + ' → ' + r); return r; }
 async function runPhrase() { await cmd($('phrase').value.trim()); }
 
+// ---- «Планы» ----
+let planData = null, planMode = 'list', planView = 'today', calMonth = null, calSelected = null;
+function setPlanView(v) {
+  planView = v;
+  document.querySelectorAll('#planview button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  loadPlans();
+}
+async function planCmd(text) {
+  const r = await post('/api/plan', text);
+  return r;
+}
+function setPlanMode(m, remember = true) {
+  planMode = m;
+  if (remember) try { localStorage.setItem('yatv-planmode', m); } catch (e) {}
+  document.querySelectorAll('#planmode button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  $('planlistbox').hidden = m !== 'list';
+  $('plancalbox').hidden = m !== 'cal';
+  if (m === 'cal') renderCal();
+}
+try { planMode = localStorage.getItem('yatv-planmode') || 'list'; } catch (e) {}
+setPlanMode(planMode, false);
+function calShift(n) {
+  calMonth.setMonth(calMonth.getMonth() + n);
+  calSelected = null;
+  renderCal();
+}
+function calKey(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function renderCal() {
+  if (!planData) return;
+  if (!calMonth) calMonth = new Date();
+  const y = calMonth.getFullYear(), mo = calMonth.getMonth();
+  $('caltitle').textContent = calMonth.toLocaleDateString('ru-RU', { month:'long', year:'numeric' });
+  const grid = $('calgrid'); grid.replaceChildren();
+  ['пн','вт','ср','чт','пт','сб','вс'].forEach(w => {
+    const e = document.createElement('div'); e.className='wd'; e.textContent=w; grid.append(e);
+  });
+  const byDay = {};
+  for (const i of planData.items || []) {
+    const k = i.date || (i.at ? calKey(new Date(i.at*1000)) : null);
+    if (!k) continue;
+    (byDay[k] = byDay[k] || []).push(i);
+  }
+  const first = new Date(y, mo, 1);
+  const start = new Date(y, mo, 1 - (first.getDay()+6)%7);
+  const todayK = calKey(new Date());
+  for (let n=0; n<42; n++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate()+n);
+    const k = calKey(d), items = byDay[k] || [];
+    const b = document.createElement('button');
+    b.className = 'calday' + (d.getMonth()!==mo?' other':'') + (k===todayK?' today':'') + (k===calSelected?' sel':'');
+    const num = document.createElement('b'); num.textContent = d.getDate(); b.append(num);
+    if (items.length) {
+      const dots = document.createElement('div'); dots.className='dots';
+      for (const it of items.slice(0,4)) {
+        const dot = document.createElement('span');
+        dot.className = 'dot ' + (it.kind === 'reminder' ? 'reminder' : it.kind === 'task' ? 'task' : 'event'); dot.title = it.title;
+        dots.append(dot);
+      }
+      b.append(dots);
+    }
+    b.onclick = () => { calSelected = k; renderCal(); renderCalEvents(k, items); };
+    grid.append(b);
+  }
+  const nodate = (planData.items||[]).filter(i => !i.date && !i.at && !i.all_day);
+  if (calSelected) {
+    const items = (planData.items||[]).filter(i => (i.date || (i.at ? calKey(new Date(i.at*1000)) : null)) === calSelected);
+    renderCalEvents(calSelected, items);
+    // Dateless tasks stay visible under the selected day too.
+    if (nodate.length) {
+      const box = $('calevents');
+      const h = document.createElement('h3'); h.textContent = 'Без даты'; box.append(h);
+      const ul = document.createElement('ul'); ul.className='planlist';
+      nodate.forEach(i => ul.appendChild(planRow(i)));
+      box.append(ul);
+    }
+  } else {
+    const box = $('calevents'); box.replaceChildren();
+    const h = document.createElement('h3'); h.textContent = 'Задачи без даты'; box.append(h);
+    if (!nodate.length) { box.innerHTML += '<p class="hint">Нажмите на день, чтобы увидеть дела.</p>'; return; }
+    const ul = document.createElement('ul'); ul.className='planlist';
+    nodate.forEach(i => ul.appendChild(planRow(i)));
+    box.append(ul);
+  }
+}
+function renderCalEvents(k, items) {
+  const box = $('calevents'); box.replaceChildren();
+  const h = document.createElement('h3');
+  h.textContent = new Date(k+'T12:00:00').toLocaleDateString('ru-RU', { day:'numeric', month:'long' });
+  box.append(h);
+  if (!items.length) { box.innerHTML += '<p class="hint">Ничего не запланировано.</p>'; return; }
+  const ul = document.createElement('ul'); ul.className='planlist';
+  items.forEach(i => ul.appendChild(planRow(i)));
+  box.append(ul);
+}
+async function loadPlans() {
+  const r = await planCmd('json');
+  try { planData = JSON.parse(r); } catch (e) { show('planmsg', 'error: ' + r, true); return; }
+  renderGoogle(); renderPlanSettings();
+  const sum = await planCmd('text ' + planView);
+  $('plansum').textContent = sum;
+  const ul = $('planlist'); ul.replaceChildren();
+  const all = planData.items || [];
+  let shown;
+  if (planView === 'today') shown = all.filter(i => i.overdue || i.day === 0 || i.day == null);
+  else if (planView === 'tomorrow') shown = all.filter(i => i.day === 1);
+  else shown = all.filter(i => i.day != null && i.day >= 0 && i.day < 7);
+  for (const i of shown) ul.appendChild(planRow(i));
+  if (!shown.length) { const li = document.createElement('li'); li.className = 'hint'; li.textContent = 'Пока пусто'; ul.appendChild(li); }
+  const done = $('plandone'); done.replaceChildren();
+  for (const t of (planData.tasks || []).filter(t => t.done).slice(-20).reverse()) {
+    const li = document.createElement('li');
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = true;
+    cb.onchange = async () => { await planCmd('undone ' + t.id); loadPlans(); };
+    const pt = document.createElement('div'); pt.className = 'pt'; pt.textContent = t.title;
+    const del = document.createElement('button'); del.className = 'danger'; del.textContent = '✕';
+    del.onclick = async () => { await planCmd('del ' + t.id); loadPlans(); };
+    li.append(cb, pt, del); done.appendChild(li);
+  }
+  if (planMode === 'cal') renderCal();
+}
+async function loadBrief() {
+  const r = await planCmd('brief json');
+  let b; try { b = JSON.parse(r); } catch (e) { show('briefmsg', r, true); return; }
+  $('brief_on').checked = !!b.on;
+  if (b.trigger != null) $('brief_trigger').value = b.trigger;
+  $('brief_weather').checked = !!b.weather;
+  $('brief_news_count').value = String(b.news_count || 5);
+  const wsel = $('brief_weather_provider'); wsel.replaceChildren();
+  for (const w of b.weather_sources || []) wsel.appendChild(new Option(w.name, w.key));
+  wsel.value = b.weather_provider || 'open-meteo';
+  weatherProviderChanged();
+  $('brief_plans').checked = !!b.plans;
+  $('brief_news_url').value = (b.news || '').startsWith('http') ? b.news : '';
+  if (b.weather_url) $('brief_weather_url').value = b.weather_url;
+  const sel = $('brief_news'); sel.replaceChildren();
+  sel.appendChild(new Option('— не читать —', ''));
+  for (const s of b.sources || []) sel.appendChild(new Option(s.name, s.key));
+  sel.value = (b.news && !b.news.startsWith('http')) ? b.news : '';
+  const raw = b.order || 'weather,plans,news';
+  const all = Array.isArray(raw) ? raw : String(raw).split(',').map(x => x.trim()).filter(Boolean);
+  // Keep every block in the saved order; disabled ones render dimmed.
+  for (const id of ['weather', 'plans', 'news']) if (!all.includes(id)) all.push(id);
+  const enabled = { weather: !!b.weather, plans: !!b.plans, news: !!(b.news || '').trim() };
+  renderBriefOrder(all, enabled);
+  $('briefstate').textContent = `Источник: ${b.news || 'не задан'}\nПогода: ${b.weather ? 'вкл' : 'выкл'}${b.weather_url ? ' (своя ссылка)' : ''}\nПланы: ${b.plans ? 'вкл' : 'выкл'}`;
+}
+function weatherProviderChanged() {
+  $('brief_weather_url_row').hidden = $('brief_weather_provider').value !== 'custom';
+}
+const ORDER_LABELS = { weather:'Погода', plans:'Планы', news:'Все новости', news1:'Новость 1', news2:'Новость 2', news3:'Новость 3', news4:'Новость 4', news5:'Новость 5' };
+let briefOrder = ['weather','plans','news'];
+function renderBriefOrder(order, enabled = {}) {
+  briefOrder = order;
+  const box = $('brief-order'); box.replaceChildren();
+  let dragFrom = -1;
+  order.forEach((id, i) => {
+    const row = document.createElement('div'); row.className='orderrow';
+    row.draggable = true;
+    if (enabled[id] === false) { row.style.opacity = '.4'; row.draggable = false; row.title = 'Блок выключен галочкой выше'; }
+    const grip = document.createElement('span'); grip.className='grip'; grip.textContent='☰'; grip.title='Перетащите вверх или вниз';
+    const label = document.createElement('span'); label.textContent = ORDER_LABELS[id] || id;
+    row.append(grip, label);
+    row.ondragstart = e => { dragFrom = i; row.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; };
+    row.ondragend = () => { row.classList.remove('dragging'); };
+    row.ondragover = e => { e.preventDefault(); e.dataTransfer.dropEffect='move'; };
+    row.ondrop = async e => {
+      e.preventDefault();
+      if (dragFrom < 0 || dragFrom === i) return;
+      const [moved] = briefOrder.splice(dragFrom, 1);
+      briefOrder.splice(i, 0, moved);
+      await postJSON('/api/settings', { brief_order: briefOrder.join(',') });
+      renderBriefOrder(briefOrder);
+    };
+    box.append(row);
+  });
+}
+function briefPatch() {
+  return {
+    brief_on: $('brief_on').checked, brief_trigger: $('brief_trigger').value.trim(),
+    brief_weather: $('brief_weather').checked, brief_plans: $('brief_plans').checked,
+    brief_weather_provider: $('brief_weather_provider').value,
+    brief_news: $('brief_news').value || $('brief_news_url').value.trim(),
+    brief_news_count: Number($('brief_news_count').value) || 5,
+    brief_weather_url: $('brief_weather_url').value.trim(),
+    brief_order: briefOrder.join(','),
+  };
+}
+async function saveBrief() { show('briefmsg', await postJSON('/api/settings', briefPatch())); loadBrief(); }
+async function saveBriefUrl() {
+  const news = $('brief_news_url').value.trim();
+  const wx = $('brief_weather_url').value.trim();
+  const patch = {};
+  if (news) { if (!news.startsWith('http')) { show('briefmsg','error: нужна RSS-ссылка http(s)://',true); return; } patch.brief_news = news; }
+  if (wx) { if (!wx.startsWith('http')) { show('briefmsg','error: нужна ссылка http(s)://',true); return; } patch.brief_weather_url = wx; }
+  if (!news && !wx) { show('briefmsg','error: введите ссылку',true); return; }
+  show('briefmsg', await postJSON('/api/settings', patch)); loadBrief();
+}
+function renderPlanSettings() {
+  const p = planData.plan || {};
+  $('planon').checked = !!planData.enabled;
+  $('planwarn').value = String(p.warn ?? 0);
+  $('plandue').value = String(p.due_time ?? 1080);
+  $('briefon').checked = !!p.brief_on;
+  $('briefdays').value = p.brief_days || 'all';
+  const at = p.brief_at ?? 480;
+  $('briefat').value = `${String(Math.floor(at/60)).padStart(2,'0')}:${String(at%60).padStart(2,'0')}`;
+}
+async function savePlannerSettings() {
+  const [h, m] = ($('briefat').value || '08:00').split(':').map(Number);
+  const r = await postJSON('/api/settings', {
+    plan_warn: Number($('planwarn').value), plan_due_time: Number($('plandue').value),
+    brief_on: $('briefon').checked, brief_at: h*60+m, brief_days: $('briefdays').value,
+  });
+  show('plansetmsg', r, r.startsWith('error'));
+  loadPlans();
+}
+function renderGoogle() {
+  const g = (planData.calendar || {}).google || {};
+  $('gon').hidden = !g.on; $('goff').hidden = !!g.on;
+  $('gstate').textContent = !g.on ? 'Google не подключён.' :
+    `Google подключён: событий ${g.events || 0}, задач ${g.tasks || 0}.` + (g.error ? ' Ошибка: ' + g.error : '');
+  $('guse').checked = !!g.on;
+  $('gcals').replaceChildren();
+  for (const c of g.calendars || []) {
+    const l = document.createElement('label'); l.className = 'switch';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!c.read; cb.dataset.id = c.id;
+    l.append(cb, document.createTextNode(c.name)); $('gcals').append(l);
+  }
+  const write = $('gwrite'), list = $('glist');
+  write.replaceChildren(new Option('primary', ''));
+  for (const c of g.calendars || []) if (c.writable) write.appendChild(new Option(c.name, c.id));
+  write.value = g.write || '';
+  list.replaceChildren(new Option('—', ''));
+  for (const l of g.lists || []) list.appendChild(new Option(l.title, l.id));
+  list.value = g.list || '';
+}
+function googleKeyParse(text) {
+  try { const j = JSON.parse(text), c = j.installed || j.web || j;
+    if (c.client_id && c.client_secret) return { id: c.client_id, secret: c.client_secret, web: !!j.web };
+  } catch (e) {}
+  return null;
+}
+async function googleKeyUse(k) {
+  if (!k) { show('gmsg', 'error: нужен JSON ключа клиента «Desktop app»', true); return; }
+  if (k.web) { show('gmsg', 'error: ключ «Web application» не подходит, создайте Desktop app', true); return; }
+  $('gid').value = k.id; $('gsecret').value = k.secret;
+  await saveGoogleClient();
+}
+async function googleKeyFile(input) {
+  const f = input.files && input.files[0]; input.value = '';
+  if (!f) return;
+  if (f.size > 100000) { show('gmsg', 'error: файл слишком большой', true); return; }
+  await googleKeyUse(googleKeyParse(await f.text()));
+}
+async function saveGoogleClient() {
+  const patch = { g_client_id: $('gid').value.trim() };
+  const secret = $('gsecret').value.trim();
+  // An empty field means «keep the one saved on the speaker» (masked on load).
+  if (secret || $('gsecret').placeholder !== 'сохранён на колонке') patch.g_client_secret = secret;
+  const r = await postJSON('/api/settings', patch);
+  show('gmsg', r.startsWith('error') ? r : 'OK: ключ сохранён — теперь «Войти в Google»');
+  await load();
+}
+async function googleLogin() {
+  if (!(await googleHasKey())) return;
+  await saveGoogleClient();
+  const r = await planCmd('google url');
+  if (!r.startsWith('OK ')) { show('gmsg', r, true); return; }
+  window.open(r.slice(3), '_blank');
+  show('gmsg', 'OK: войдите в Google, затем скопируйте адрес вкладки и вставьте ниже');
+}
+async function googleCode() {
+  const v = $('gpaste').value.trim();
+  if (!v) { show('gmsg', 'error: вставьте адрес из браузера', true); return; }
+  const r = await planCmd('google code ' + v);
+  show('gmsg', r, r.startsWith('error'));
+  if (r.startsWith('OK')) { $('gpaste').value = ''; await load(); loadPlans(); }
+}
+async function googleHasKey() {
+  if ($('gid').value.trim() && ($('gsecret').value.trim() || $('gsecret').placeholder === 'сохранён на колонке')) return true;
+  show('gmsg', 'error: сначала загрузите JSON ключа Google (шаг 1) или введите Client ID и secret вручную', true);
+  return false;
+}
+async function googleDevice() {
+  if (!(await googleHasKey())) return;
+  await saveGoogleClient();
+  const r = await planCmd('google device');
+  try {
+    const j = JSON.parse(r);
+    if (!j.ok) { show('gmsg', 'error: ' + r, true); return; }
+    show('gmsg', `Код: ${j.user_code}. Откройте ${j.url} и введите его. Затем нажмите «Проверить».`);
+  } catch (e) { show('gmsg', 'error: ' + r, true); }
+}
+async function googleDevicePoll() {
+  show('gmsg', 'Проверяю…');
+  const r = await planCmd('google device-poll');
+  if (r === 'pending') { show('gmsg', 'Ещё не разрешили — введите код на ' + 'google.com/device и нажмите «Проверить» ещё раз'); return; }
+  show('gmsg', r, r.startsWith('error'));
+  if (r.startsWith('OK')) { await load(); loadPlans(); }
+}
+async function saveGoogle() {
+  const read = [...document.querySelectorAll('#gcals input')].filter(cb => cb.checked).map(cb => cb.dataset.id);
+  const r = await postJSON('/api/settings', {
+    g_on: $('guse').checked, g_read: read,
+    g_write: $('gwrite').value || '', g_list: $('glist').value || '',
+  });
+  show('gmsg', r, r.startsWith('error'));
+  await load(); loadPlans();
+}
+function planRow(i) {
+  const li = document.createElement('li'); if (i.overdue) li.className = 'late';
+  const cb = document.createElement('input'); cb.type = 'checkbox';
+  cb.title = 'Отметить выполненной';
+  cb.onchange = async () => {
+    if (i.source === 'google') await planCmd('gdone ' + JSON.stringify({list:i.list,id:String(i.id)}));
+    else if (/^\d+$/.test(String(i.id))) await planCmd('done ' + i.id);
+    loadPlans();
+  };
+  const pt = document.createElement('div'); pt.className = 'pt';
+  const b = document.createElement('b');
+  const dot = document.createElement('span');
+  dot.className = 'kinddot ' + (i.kind === 'reminder' ? 'reminder' : i.kind === 'task' ? 'task' : 'event');
+  b.append(dot, (i.overdue ? '⚠ ' : '') + i.title);
+  // Every task can be renamed in place (local tasks via edit, Google via gedit).
+  if (i.kind === 'task' && /^\d+$/.test(String(i.id)) || i.kind === 'task' && i.source === 'google') {
+    b.style.cursor = 'text'; b.title = 'Нажмите, чтобы переименовать';
+    b.onclick = () => {
+      const input = document.createElement('input');
+      input.value = i.title; input.className = 'edit-task';
+      b.replaceWith(input); input.focus(); input.select();
+      const save = async () => {
+        const v = input.value.trim();
+        if (v && v !== i.title) {
+          const cmd = i.source === 'google'
+            ? 'gedit ' + JSON.stringify({list:i.list,id:String(i.id),title:v})
+            : 'edit ' + JSON.stringify({id:Number(i.id),title:v});
+          await planCmd(cmd);
+        }
+        loadPlans();
+      };
+      input.onkeydown = e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') loadPlans(); };
+      input.onblur = () => { if (document.contains(input)) save(); };
+    };
+  }
+  pt.appendChild(b);
+  const small = document.createElement('small');
+  const kind = i.kind === 'reminder' ? 'напоминание' : i.kind === 'task' ? 'задача' : 'событие';
+  small.textContent = [kind, i.time || (i.all_day ? 'весь день' : ''), i.day_word || ''].filter(Boolean).join(' · ');
+  pt.appendChild(small);
+  const del = document.createElement('button'); del.className = 'danger'; del.textContent = '✕';
+  del.title = 'Удалить задачу';
+  del.onclick = async () => {
+    if (i.source === 'google') await planCmd('gdel ' + JSON.stringify({list:i.list,id:String(i.id)}));
+    else if (/^\d+$/.test(String(i.id))) await planCmd('del ' + i.id);
+    loadPlans();
+  };
+  li.append(cb, pt, del); return li;
+}
+async function planAdd() {
+  const title = $('plantitle').value.trim(); if (!title) { show('planmsg', 'error: введите задачу', true); return; }
+  const when = $('planwhen').value.trim();
+  const text = when ? title + ' ' + when : title;
+  const r = await planCmd('say ' + text);
+  show('planmsg', r, r.startsWith('error'));
+  if (!r.startsWith('error')) { $('plantitle').value = ''; $('planwhen').value = ''; }
+  loadPlans();
+}
+
 async function load() {
   settings = await (await fetch('/api/status')).json();
   $('version').textContent = 'v' + (settings.version || '?') + '  ·  yatv.local';
+  // The speaker is in UTC; the planner needs the owner's local offset.
+  // Same as the phone does: take it from the browser once and save it on the speaker.
+  const mine = -new Date().getTimezoneOffset();
+  if (settings.tz_offset !== mine) {
+    await postJSON('/api/settings', { tz_offset: mine });
+    settings.tz_offset = mine;
+  }
+  // The key is saved on the speaker; show that it is there without printing the secret.
+  if (settings.g_client_id && !$('gid').value) $('gid').value = settings.g_client_id;
+  if (settings.g_key_saved) $('gsecret').placeholder = 'сохранён на колонке';
   state.tvs = settings.tvs || []; state.phrases = settings.phrases || []; state.appsByHost = {};
   for (const t of state.tvs) {
     if (!t.host) continue;
@@ -113,7 +698,7 @@ async function load() {
       state.appsByHost[t.host] = j;
     } catch (e) { state.appsByHost[t.host] = { apps: [], names: {} }; }
   }
-  renderTvs(); renderPhrases(); loadJournal();
+  renderTvs(); renderPhrases(); loadPlans(); loadJournal();
 }
 function appSelect(value, host) {
   const cached = (host && state.appsByHost[host]) || { apps: [], names: {} };
@@ -182,14 +767,32 @@ async function saveAll() {
 }
 async function loadJournal() {
   const j = await (await fetch('/api/status')).json();
-  $('log').textContent = (j.journal || []).map(e => `${formatTime(e.time)} [${e.kind}] ${e.text}`).join('\n');
+  // /api/status already returns the newest entries first (log::latest()).
+  const lines = j.journal || [];
+  let lastDay = '', html = '';
+  for (const e of lines) {
+    const d = new Date(parseInt(e.time, 10) * 1000);
+    const day = d.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric' });
+    if (day !== lastDay) {
+      html += `<div class="logday">---------- ${day} ----------</div>`;
+      lastDay = day;
+    }
+    const time = d.toLocaleTimeString('ru-RU', { hour12:false });
+    const line = `${time} [${e.kind}] ${escapeHtml(e.text || '')}`;
+    const cls = (e.kind === 'heard' || e.kind === 'phrase') ? 'logheard'
+      : (e.kind === 'error' || e.kind === 'skip') ? 'logerror' : '';
+    html += `<div class="logline ${cls}">${line}</div>`;
+  }
+  $('log').innerHTML = html || '<div class="hint">Журнал пуст</div>';
 }
+function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' })[c]); }
 async function clearJournal() { await post('/api/journal/clear', ''); loadJournal(); }
 function formatTime(t) {
-  if (/^\d+$/.test(t || '')) return new Date(parseInt(t,10) * 1000).toLocaleString('ru-RU', { hour12: false });
+  if (/^\d+$/.test(t || '')) return new Date(parseInt(t,10) * 1000).toLocaleTimeString('ru-RU', { hour12: false });
   return t || '';
 }
 load();
+setInterval(() => { if (!document.hidden) loadJournal(); }, 10000);
 </script>
 </body>
 </html>

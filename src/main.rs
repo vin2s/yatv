@@ -7,11 +7,16 @@
 mod action;
 mod adb;
 mod b64;
+mod brief;
+mod calendar;
 mod fsx;
+mod google;
 mod log;
 mod parse;
+mod planner;
 mod server;
 mod settings;
+mod sha256;
 mod voice;
 mod tv;
 
@@ -28,6 +33,8 @@ pub enum Cmd {
     Phrase(String, String, Sender<String>),
     /// A direct action, mostly from the panel.
     Act(Box<action::TvAction>, Sender<String>),
+    /// Planner command from the panel: `plan json`, `plan add …`, `plan done 1`.
+    Plan(String, Sender<String>),
     /// Settings changed (TV host, aliases, …).
     Settings(serde_json::Value, Sender<String>),
     /// Stop the daemon.
@@ -45,6 +52,11 @@ fn main() {
     fsx::ensure_dir(&dir);
 
     let settings = settings::Settings::load(&dir);
+    planner::configure(true, settings.extra.get("tz_offset").and_then(|v| v.as_i64()).unwrap_or(180) as i32);
+    apply_planner(&settings);
+    planner::run(&dir);
+    apply_google(&settings);
+    calendar::run(&dir);
     tv::set_phrases(settings.phrase_list());
     tv::set_search_apps(
         settings.tvs.iter()
@@ -72,11 +84,23 @@ fn controller(dir: PathBuf, rx: Receiver<Cmd>) {
         match cmd {
             Cmd::Stop => break,
             Cmd::Settings(patch, reply) => {
+                // Google client id/secret are secrets in the journal: log only presence.
+                let g_id = patch.get("g_client_id").and_then(|v| v.as_str()).unwrap_or("");
+                if patch.get("g_client_id").is_some() {
+                    log::add(&dir, "google", &format!(
+                        "сохранение ключа: client_id={}, secret={}",
+                        if g_id.is_empty() { "ПУСТО" } else { "есть" },
+                        if patch.get("g_client_secret").and_then(|v| v.as_str()).unwrap_or("").is_empty() { "ПУСТО" } else { "есть" }
+                    ));
+                }
                 // Kept minimal: the panel writes the config file itself. The
                 // controller only reloads the in-memory aliases.
                 let current = settings::Settings::load(&dir);
                 if let Ok(s) = settings::Settings::from_patch(&current, &patch) {
                     let _ = s.save(&dir);
+                    planner::configure(true, s.extra.get("tz_offset").and_then(|v| v.as_i64()).unwrap_or(180) as i32);
+                    apply_planner(&s);
+                    apply_google(&s);
                     tv::set_phrases(s.phrase_list());
                     tv::set_search_apps(
                         s.tvs.iter()
@@ -91,6 +115,56 @@ fn controller(dir: PathBuf, rx: Receiver<Cmd>) {
                 // Full trace: every phrase from Alice/the panel, with the TV
                 // hint, so a wrong capture can be diagnosed from the journal.
                 log::add(&dir, "heard", &format!("{phrase:?} hint={tv_hint:?}"));
+                // «Стоп» while the brief is running stops it instead of Alice.
+                let said_text = planner_text(&phrase);
+                if ["стоп", "стоп сводка", "останови сводку", "хватит"].contains(&said_text.as_str()) {
+                    voice::cancel_alice();
+                    if brief::request_stop() {
+                        let _ = reply.send("OK: сводка остановлена".to_owned());
+                    } else {
+                        let _ = reply.send("OK".to_owned());
+                    }
+                    continue;
+                }
+                // The brief runs only on the phrase the owner typed in the panel.
+                // Any other phrase (including «доброе утро» by default) is left
+                // entirely to stock Alice.
+                let s = settings::Settings::load(&dir);
+                let trigger = brief::trigger_from(&s);
+                if brief::is_trigger(&phrase, &trigger)
+                    && s.extra.get("brief_on").and_then(|v| v.as_bool()).unwrap_or(true) {
+                    log::add(&dir, "action", &format!("сводка по фразе {phrase:?}"));
+                    voice::cancel_alice();
+                    let answer = "OK: сводка началась".to_owned();
+                    let _ = reply.send(answer.clone());
+                    thread::spawn(move || { brief::run(&s); });
+                    continue;
+                }
+                // Planner has its own narrow whitelist. A plan phrase is ours
+                // (cancel Alice, answer, speak) and never reaches the TV parser.
+                // «Напомни…» is the exception: Alice's reminders announce through
+                // the умный дом on every speaker at once, and a yatv-owned copy
+                // would repeat the same words seconds later on this one only —
+                // both engines were firing on one phrase.
+                let plan_intent = planner::voice(&planner_text(&phrase));
+                let ours = !matches!(plan_intent, Some(planner::Voice::Remind(_)));
+                if let (true, Some(v)) = (ours, plan_intent) {
+                    log::add(&dir, "action", &format!("план: {phrase:?}"));
+                    // Stock Alice answers «планы/сегодня/завтра» herself: take
+                    // the phrase away from her, as on other controllers.
+                    voice::cancel_alice();
+                    thread::spawn(|| {
+                        thread::sleep(std::time::Duration::from_millis(250));
+                        voice::cancel_alice();
+                        thread::sleep(std::time::Duration::from_millis(400));
+                        voice::cancel_alice();
+                    });
+                    let answer = planner::handle(v);
+                    log::add(&dir, "phrase", &format!("{phrase} → {answer}"));
+                    let _ = reply.send(answer.clone());
+                    voice::say(answer);
+                    continue;
+                }
                 // First: is this even a TV command? Like yatv's device_in,
                 // a named device only counts when the rest is a TV action
                 // («котел на 65» is Alice's kettle, not our TV).
@@ -102,7 +176,9 @@ fn controller(dir: PathBuf, rx: Receiver<Cmd>) {
                     // greetings, her smart-home entities).
                     voice::cancel_alice();
                     thread::spawn(|| {
-                        thread::sleep(std::time::Duration::from_millis(300));
+                        thread::sleep(std::time::Duration::from_millis(250));
+                        voice::cancel_alice();
+                        thread::sleep(std::time::Duration::from_millis(400));
                         voice::cancel_alice();
                     });
                 }
@@ -178,7 +254,312 @@ fn controller(dir: PathBuf, rx: Receiver<Cmd>) {
                 let _ = reply.send(answer.clone());
                 voice::say(answer);
             }
+            Cmd::Plan(command, reply) => {
+                let answer = plan_command(&command);
+                let _ = reply.send(answer);
+            }
         }
+    }
+}
+
+fn apply_planner(s: &settings::Settings) {
+    let defaults = planner::Plan::default();
+    planner::configure_plan(planner::Plan {
+        warn: s.extra.get("plan_warn").and_then(|v| v.as_u64()).map(|v| v.clamp(0, 240) as u16).unwrap_or(defaults.warn),
+        due_time: s.extra.get("plan_due_time").and_then(|v| v.as_u64()).map(|v| v.clamp(0, 1440) as u16).unwrap_or(defaults.due_time),
+        brief_on: s.extra.get("brief_on").and_then(|v| v.as_bool()).unwrap_or(defaults.brief_on),
+        brief_at: s.extra.get("brief_at").and_then(|v| v.as_u64()).map(|v| v.clamp(0, 1439) as u16).unwrap_or(defaults.brief_at),
+        brief_days: s.extra.get("brief_days").and_then(|v| v.as_str()).map(|v| if v == "weekdays" { "weekdays".into() } else { "all".into() }).unwrap_or(defaults.brief_days),
+    });
+}
+
+fn get_bool(s: &settings::Settings, key: &str) -> bool {
+    s.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+fn get_strings(s: &settings::Settings, key: &str) -> Vec<String> {
+    s.extra.get(key).and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default()
+}
+fn get_string(s: &settings::Settings, key: &str) -> String {
+    s.extra.get(key).and_then(|v| v.as_str()).unwrap_or("").to_owned()
+}
+fn apply_google(s: &settings::Settings) {
+    google::configure(google::Config {
+        client_id: get_string(s, "g_client_id"), secret: get_string(s, "g_client_secret"), refresh: get_string(s, "g_refresh"),
+    });
+    calendar::configure(get_bool(s, "g_on") && google::connected(), &get_strings(s, "g_read"),
+        &get_string(s, "g_write"), &get_string(s, "g_list"));
+}
+
+/// Alice's phrases arrive with the wake word; the panel sends clean text.
+fn planner_text(text: &str) -> String {
+    let t = text.trim().to_lowercase().replace('ё', "е");
+    let t = t.strip_prefix("алиса, ").unwrap_or(&t).trim().to_owned();
+    t.trim_end_matches(['?', '!', '.']).trim().to_owned()
+}
+
+/// The panel's `plan …` commands.
+fn plan_command(command: &str) -> String {
+    let (what, rest) = command.split_once(' ').unwrap_or((command, ""));
+    // Read-only panel commands («json», «text», «brief json», …) are polled
+    // constantly — logging them would push the real events out of the journal.
+    let noisy = matches!(what, "json" | "text" | "speak" | "brief") && rest.trim() != "test";
+    let answer = plan_dispatch(what, rest);
+    if !noisy {
+        log::add(&crate::state_dir(), "cmd", &format!("{what} {}", redact(&answer)));
+    }
+    answer
+}
+
+/// Secrets never reach the journal: a pasted OAuth address holds a code.
+fn redact(text: &str) -> String {
+    let mut out = text.to_owned();
+    for marker in ["code=", "client_secret=", "g_refresh"] {
+        if let Some(at) = out.find(marker) {
+            let tail = out[at..].split_whitespace().next().unwrap_or("");
+            out = out.replace(tail, "<скрыто>");
+        }
+    }
+    out.chars().take(300).collect()
+}
+
+fn plan_dispatch(what: &str, rest: &str) -> String {
+    match what {
+        "json" => {
+            let mut v = planner::json();
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("calendar".into(), crate::calendar::json());
+            }
+            v.to_string()
+        },
+        "add" => match serde_json::from_str::<serde_json::Value>(rest) {
+            Ok(v) if v["title"].as_str().is_some_and(|t| !t.trim().is_empty()) => {
+                let t = planner::add(
+                    v["title"].as_str().unwrap_or(""),
+                    v["due"].as_i64(),
+                    v["repeat"].as_str().unwrap_or(""),
+                    v["remind"].as_bool().unwrap_or(v["due"].is_i64()),
+                    v["category"].as_str().unwrap_or(""),
+                    v["priority"].as_str().unwrap_or("normal"),
+                );
+                format!("OK: добавлено «{}»", t.title)
+            }
+            _ => "error: нужен заголовок".into(),
+        },
+        "done" => if planner::set_done(rest.trim().parse().unwrap_or(0), true) { "OK".into() } else { "error: нет такой задачи".into() },
+        "undone" => if planner::set_done(rest.trim().parse().unwrap_or(0), false) { "OK".into() } else { "error: нет такой задачи".into() },
+        "del" => if planner::delete(rest.trim().parse().unwrap_or(0)) { "OK".into() } else { "error: нет такой задачи".into() },
+        "edit" => {
+            let v: serde_json::Value = serde_json::from_str(rest).unwrap_or_default();
+            match planner::edit(v["id"].as_u64().unwrap_or(0), v["title"].as_str().unwrap_or(""), v["due"].as_i64(),
+                                v["repeat"].as_str().unwrap_or(""), v["priority"].as_str().unwrap_or("normal")) {
+                Some(t) => format!("OK: сохранено «{}»", t.title),
+                None => "error: нет такой задачи или пустое название".into(),
+            }
+        }
+        "gdone" => {
+            let v: serde_json::Value = serde_json::from_str(rest).unwrap_or_default();
+            match crate::calendar::complete_task(v["list"].as_str().unwrap_or(""), v["id"].as_str().unwrap_or("")) {
+                Ok(_) => "OK: выполнено".into(),
+                Err(e) => format!("error: {e}"),
+            }
+        }
+        "gdel" => {
+            let v: serde_json::Value = serde_json::from_str(rest).unwrap_or_default();
+            match crate::calendar::delete_task(v["list"].as_str().unwrap_or(""), v["id"].as_str().unwrap_or("")) {
+                Ok(_) => "OK: удалено".into(),
+                Err(e) => format!("error: {e}"),
+            }
+        }
+        "gedit" => {
+            let v: serde_json::Value = serde_json::from_str(rest).unwrap_or_default();
+            let title = v["title"].as_str().unwrap_or("").trim().to_owned();
+            if title.is_empty() {
+                "error: нужно название".into()
+            } else {
+                match crate::calendar::update_task(
+                    v["list"].as_str().unwrap_or(""), v["id"].as_str().unwrap_or(""), &title,
+                    v["due_day"].as_i64(), v["notes"].as_str().unwrap_or("")) {
+                    Ok(_) => format!("OK: сохранено «{title}»"),
+                    Err(e) => format!("error: {e}"),
+                }
+            }
+        }
+        "say" => match planner::voice(&planner_text(rest)) {
+            Some(v) => planner::handle(v),
+            None => "error: не поняла фразу".into(),
+        },
+        "calendar" => {
+            calendar::wake();
+            "OK: обновляю календарь".into()
+        }
+        "brief" => {
+            let s = settings::Settings::load(&crate::state_dir());
+            match rest.trim() {
+                "test" => {
+                    let s2 = s.clone();
+                    thread::spawn(move || { brief::run(&s2); });
+                    "OK: сводка началась".to_owned()
+                }
+                "json" => serde_json::json!({
+                    "on": s.extra.get("brief_on").and_then(|v| v.as_bool()).unwrap_or(true),
+                    "trigger": brief::trigger_from(&s),
+                    "weather_url": s.extra.get("brief_weather_url").and_then(|v| v.as_str()).unwrap_or(""),
+                    "weather_provider": s.extra.get("brief_weather_provider").and_then(|v| v.as_str()).unwrap_or("open-meteo"),
+                    "weather_sources": brief::WEATHER_SOURCES.iter().map(|(k, n)| serde_json::json!({"key": k, "name": n})).collect::<Vec<_>>(),
+                    "order": s.extra.get("brief_order").and_then(|v| v.as_str()).unwrap_or("weather,plans,news"),
+                    "news": s.extra.get("brief_news").and_then(|v| v.as_str()).unwrap_or(""),
+                    "news_count": s.extra.get("brief_news_count").and_then(|v| v.as_u64()).unwrap_or(5),
+                    "weather": s.extra.get("brief_weather").and_then(|v| v.as_bool()).unwrap_or(true),
+                    "plans": s.extra.get("brief_plans").and_then(|v| v.as_bool()).unwrap_or(true),
+                    "lat": s.extra.get("brief_lat").and_then(|v| v.as_f64()),
+                    "lon": s.extra.get("brief_lon").and_then(|v| v.as_f64()),
+                    "sources": brief::SOURCES.iter().map(|(k, n, _)| serde_json::json!({"key": k, "name": n})).collect::<Vec<_>>(),
+                }).to_string(),
+                _ => "usage: brief test | brief json".into(),
+            }
+        }
+        "google" => {
+            let (what, arg) = rest.split_once(' ').unwrap_or((rest, ""));
+            match what {
+                "url" => {
+                    let s = settings::Settings::load(&crate::state_dir());
+                    let id = get_string(&s, "g_client_id");
+                    let secret = get_string(&s, "g_client_secret");
+                    log::add(&crate::state_dir(), "google", &format!(
+                        "запрос ссылки: client_id={}, secret={}",
+                        if id.is_empty() { "ПУСТО" } else { "есть" },
+                        if secret.is_empty() { "ПУСТО" } else { "есть" }
+                    ));
+                    if id.is_empty() || secret.is_empty() {
+                        "error: сначала сохраните ID и секрет клиента (шаг 1: загрузите JSON ключа или введите вручную)".into()
+                    } else {
+                        format!("OK {}", google::auth_url(&id))
+                    }
+                }
+                "device" => {
+                    let s = settings::Settings::load(&crate::state_dir());
+                    let (id, secret) = (get_string(&s, "g_client_id"), get_string(&s, "g_client_secret"));
+                    log::add(&crate::state_dir(), "google", &format!(
+                        "запрос device-кода: client_id={}, secret={}",
+                        if id.is_empty() { "ПУСТО" } else { "есть" },
+                        if secret.is_empty() { "ПУСТО" } else { "есть" }
+                    ));
+                    if id.is_empty() || secret.is_empty() {
+                        "error: сначала сохраните ID и секрет клиента (шаг 1: загрузите JSON ключа или введите вручную)".into()
+                    } else {
+                        let r = google::agent().and_then(|a| google::device_start(&a, &id, &secret));
+                        match r {
+                            Ok(prompt) => {
+                                log::add(&crate::state_dir(), "google", &format!("device-код получен: {}", prompt.user_code));
+                                voice::say(format!("Зайдите на {} и введите код {}", prompt.verification_url, prompt.user_code));
+                                serde_json::json!({ "ok": true, "user_code": prompt.user_code, "url": prompt.verification_url }).to_string()
+                            }
+                            Err(e) => {
+                                log::add(&crate::state_dir(), "google", &format!("device-код: ошибка: {e}"));
+                                format!("error: {e}")
+                            }
+                        }
+                    }
+                }
+                "device-poll" => {
+                    log::add(&crate::state_dir(), "google", "опрос device-токена");
+                    let r = google::agent().and_then(|a| google::device_poll(&a));
+                    match r {
+                        Ok(None) => {
+                            log::add(&crate::state_dir(), "google", "device: пользователь ещё не разрешил");
+                            "pending".into()
+                        }
+                        Ok(Some(refresh)) => {
+                            log::add(&crate::state_dir(), "google", "device: токен получен, сохраняю");
+                            let dir = crate::state_dir();
+                            let mut s = settings::Settings::load(&dir);
+                            s.extra.insert("g_refresh".into(), serde_json::json!(refresh));
+                            s.extra.insert("g_on".into(), serde_json::json!(true));
+                            if let Err(e) = s.save(&dir) {
+                                format!("error: не сохранилось: {e}")
+                            } else {
+                                apply_google(&s);
+                                "OK: Google подключён".into()
+                            }
+                        }
+                        Err(e) => {
+                            log::add(&crate::state_dir(), "google", &format!("device: ошибка: {e}"));
+                            format!("error: {e}")
+                        },
+                    }
+                }
+                "code" => {
+                let dir = crate::state_dir();
+                let mut s = settings::Settings::load(&dir);
+                let (id, secret, pasted) = (get_string(&s, "g_client_id"), get_string(&s, "g_client_secret"), arg.trim().to_owned());
+                log::add(&dir, "google", &format!(
+                    "обмен кода: client_id={}, secret={}, адрес={}",
+                    if id.is_empty() { "ПУСТО" } else { "есть" },
+                    if secret.is_empty() { "ПУСТО" } else { "есть" },
+                    redact(&pasted)
+                ));
+                let (tx, rx) = std::sync::mpsc::channel();
+                // Exchange in a thread: the network must not block the controller.
+                std::thread::spawn(move || {
+                    let r = google::agent().and_then(|a| google::exchange(&a, &id, &secret, &pasted));
+                    let _ = tx.send(r);
+                });
+                match rx.recv_timeout(std::time::Duration::from_secs(40)) {
+                    Ok(Ok(refresh)) => {
+                        log::add(&dir, "google", "код принят, сохраняю refresh-токен");
+                        s.extra.insert("g_refresh".into(), serde_json::json!(refresh));
+                        s.extra.insert("g_on".into(), serde_json::json!(true));
+                        if let Err(e) = s.save(&dir) {
+                            format!("error: не сохранилось: {e}")
+                        } else {
+                            apply_google(&s);
+                            "OK: Google подключён".into()
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        log::add(&dir, "google", &format!("обмен кода: ошибка: {e}"));
+                        format!("error: {e}")
+                    },
+                    Err(_) => {
+                        log::add(&dir, "google", "обмен кода: таймаут");
+                        "error: timeout".into()
+                    },
+                }
+            }
+            "off" => {
+                let dir = crate::state_dir();
+                log::add(&dir, "google", "отключение Google");
+                let mut s = settings::Settings::load(&dir);
+                s.extra.insert("g_refresh".into(), serde_json::json!(""));
+                s.extra.insert("g_on".into(), serde_json::json!(false));
+                if let Err(e) = s.save(&dir) {
+                    format!("error: не сохранилось: {e}")
+                } else {
+                    apply_google(&s);
+                    "OK: Google отключён".into()
+                }
+            }
+            _ => "usage: google url | google code <адрес> | google off".into(),
+            }
+        }
+        "text" | "speak" => {
+            let ask = match rest.trim() {
+                "tomorrow" => planner::Ask::Plans(1),
+                "week" => planner::Ask::Week,
+                "deadlines" => planner::Ask::Deadlines,
+                "brief" => planner::Ask::Brief,
+                _ => planner::Ask::Plans(0),
+            };
+            let text = planner::agenda_text(ask, planner::now(), planner::offset());
+            if what == "speak" {
+                voice::say(text);
+                "OK".into()
+            } else {
+                text
+            }
+        }
+        _ => "usage: plan json | add <json> | done|undone|del <id> | edit <json> | say <phrase> | text|speak <view>".into(),
     }
 }
 
@@ -243,13 +624,16 @@ fn run(dir: &PathBuf, action: &action::TvAction, host_override: &str) -> String 
     let host = if !host_override.trim().is_empty() {
         host_override.trim().to_owned()
     } else {
-        settings.tv_host.clone()
+        settings.tv_list().first().map(|t| t.host.clone()).unwrap_or_else(|| settings.tv_host.clone())
     };
     if host.trim().is_empty() {
         return "error: адрес телевизора не задан в настройках".to_owned();
     }
     match tv::run(&host, dir, action) {
-        Ok(text) => text,
+        Ok(text) => {
+            log::add(dir, "action", &format!("ТВ {host}: {:?} → {}", action, text.chars().take(120).collect::<String>()));
+            text
+        }
         Err(e) => {
             let msg = format!("error: {e} @ {host}");
             log::add(dir, "error", &msg);
@@ -260,6 +644,17 @@ fn run(dir: &PathBuf, action: &action::TvAction, host_override: &str) -> String 
 
 /// Marked ready once the panel and the voice listener are up: the installer
 /// waits for this file and rolls back if it does not appear.
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    #[test]
+    fn plan_say_adds_a_task() {
+        let r = plan_command("say добавь задачу купить хлеб завтра в 10");
+        assert!(!r.starts_with("error"), "{r}");
+    }
+}
+
 pub fn mark_ready() {
     let run = std::env::var("YATV_RUN").unwrap_or_else(|_| "/run".into());
     let path = std::path::Path::new(&run).join("yatv.ready");

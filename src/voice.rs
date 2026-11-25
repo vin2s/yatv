@@ -43,8 +43,11 @@ pub fn split_tv_hint(text: &str) -> (String, String) {
 pub fn watch(tx: Sender<Cmd>) {
     thread::spawn(move || {
         let address: SocketAddr = ADDRESS.parse().expect("address");
-        let mut seen: VecDeque<Vec<u8>> = VecDeque::new();
         loop {
+            // A fresh `seen` per connection: the request ids come from maind and
+            // start over when it restarts, so ids kept from an older connection
+            // would drop brand-new phrases as «duplicates».
+            let mut seen: VecDeque<Vec<u8>> = VecDeque::new();
             match TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
                 Ok(mut socket) => {
                     eprintln!("voice: connected to Alice");
@@ -205,24 +208,36 @@ fn read_frames(
             continue;
         };
         let phrase = text.trim().to_owned();
-        let request_key = bytes(state, 2).map(|b| b.to_vec()).unwrap_or_default();
-        if seen.contains(&request_key) {
-            continue;
-        }
         if phrase.is_empty() || phrase.len() > 512 {
             continue;
         }
-        seen.push_back(request_key);
-        if seen.len() > 64 {
-            seen.pop_front();
+        // Short spoken commands («новости», «какие планы», «стоп») are never
+        // deduped: a repeated key from maind must not make us deaf to them.
+        // Only long forwarded phrases keep the duplicate guard.
+        if phrase.len() > 60 {
+            let request_key = bytes(state, 2).map(|b| b.to_vec()).unwrap_or_default();
+            let fingerprint = [request_key.as_slice(), phrase.as_bytes()].concat();
+            if !request_key.is_empty() && seen.contains(&fingerprint) {
+                continue;
+            }
+            seen.push_back(fingerprint);
+            if seen.len() > 128 {
+                seen.pop_front();
+            }
         }
         let full = normalize(&phrase);
         if full.is_empty() {
             continue;
         }
+        eprintln!("voice: phrase {full:?}");
         // A TV mentioned at the end: «… на втором этаже». The controller
         // resolves it against the configured TV names; here we just pass it.
-        let (phrase, tv_hint) = split_tv_hint(&full);
+        // Planner phrases keep «на завтра / на сегодня» — that is a day, not a TV.
+        let lower = full.to_lowercase();
+        let is_plan = lower.contains("планы") || lower.contains("задач") || lower.contains("дела")
+            || lower.contains("расписан") || lower.contains("напомни") || lower.contains("добавь")
+            || lower.contains("дедлайн") || lower.contains("срок") || lower.contains("календар");
+        let (phrase, tv_hint) = if is_plan { (full.clone(), String::new()) } else { split_tv_hint(&full) };
         if phrase.is_empty() {
             continue;
         }
@@ -234,11 +249,20 @@ fn read_frames(
 /// Says an answer through Alice's TTS. Never blocks the controller.
 pub fn say(text: String) {
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(600));
+        // After the phrase is cancelled (up to ~700 ms), otherwise the cancel
+        // swallows our own TTS and stock Alice answers instead.
+        thread::sleep(Duration::from_millis(1100));
         if let Err(e) = speak(&text) {
             eprintln!("say: {text:?}: {e}");
         }
     });
+}
+
+/// Says it and returns when she is done — for a sequence of brief phrases.
+pub fn say_wait(text: &str) {
+    if let Err(e) = speak(text) {
+        eprintln!("say: {text:?}: {e}");
+    }
 }
 
 fn speak(text: &str) -> io::Result<()> {
@@ -263,7 +287,10 @@ fn speak(text: &str) -> io::Result<()> {
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;
     let started = std::time::Instant::now();
     let mut data = Vec::new();
-    while started.elapsed() < Duration::from_secs(10) {
+    // As on other controllers: wait for Alice's TTS state — 2 = speaking, then 0/6 = done.
+    // If the firmware sends no state, the 5 s read timeout is the fallback.
+    let mut speaking = false;
+    while started.elapsed() < Duration::from_secs(30) {
         let mut len = [0u8; 4];
         match socket.read_exact(&mut len) {
             Ok(()) => {}
@@ -278,6 +305,17 @@ fn speak(text: &str) -> io::Result<()> {
         }
         data.resize(n, 0);
         socket.read_exact(&mut data)?;
+        if number(&data, 253) == Some(3) {
+            let state = bytes(&data, 252).unwrap_or_default();
+            match number(state, 1) {
+                Some(2) => {
+                    speaking = true;
+                    let _ = socket.set_read_timeout(Some(Duration::from_secs(15)));
+                }
+                Some(0 | 6) if speaking => return Ok(()),
+                _ => {}
+            }
+        }
     }
     Ok(())
 }

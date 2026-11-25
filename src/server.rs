@@ -97,10 +97,27 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
             let _ = std::fs::write(&file, &json);
             ("200 OK", "text/plain; charset=utf-8", "Сохранено".into())
         }
+        ("POST", "/api/plan") => {
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            let command = body.trim().to_owned();
+            if tx.send(Cmd::Plan(command, reply_tx)).is_err() {
+                ("500 Internal Server Error", "text/plain", "controller stopped".to_owned())
+            } else {
+                match reply_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                    Ok(answer) => ("200 OK", "text/plain; charset=utf-8", answer),
+                    Err(_) => ("504 Gateway Timeout", "text/plain", "planner did not answer".to_owned()),
+                }
+            }
+        }
         ("POST", "/api/cmd") => {
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             let command = body.trim().to_owned();
-            let (phrase, hint) = crate::voice::split_tv_hint(&command);
+            let (phrase, hint) = if command.to_lowercase().contains("план")
+                || command.to_lowercase().contains("задач") || command.to_lowercase().contains("напомни") {
+                (body.clone(), String::new())
+            } else {
+                crate::voice::split_tv_hint(&command)
+            };
             let cmd = Cmd::Phrase(phrase, hint, reply_tx);
             if tx.send(cmd).is_err() {
                 ("500 Internal Server Error", "text/plain", "controller stopped".to_owned())
@@ -132,6 +149,10 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
                 "tv_name": settings.tv_name,
                 "tvs": settings.tv_list(),
                 "phrases": settings.phrases,
+                "g_client_id": settings.extra.get("g_client_id").and_then(|v| v.as_str()).unwrap_or(""),
+                "g_key_saved": settings.extra.get("g_client_secret").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()),
+                "tz_offset": settings.extra.get("tz_offset").and_then(|v| v.as_i64()),
+                "planner": crate::planner::json(),
                 
                 "journal": crate::log::latest(&crate::state_dir()),
             });
@@ -142,8 +163,9 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
         }
         _ => ("404 Not Found", "text/plain", "not found".to_owned()),
     };
+    let content_type = if kind.contains("charset=") { kind.to_owned() } else { format!("{kind}; charset=utf-8") };
     let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {kind}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         payload.as_bytes().len()
     );
     let _ = stream.write_all(head.as_bytes());
