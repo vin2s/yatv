@@ -33,12 +33,12 @@ BIN="target/$TARGET/release/yatv"
 PKG="$ROOT/dist/yatv"
 rm -rf "$PKG" && mkdir -p "$PKG"
 cp "$BIN" "$PKG/yatv"
-cp packaging/run.sh packaging/yatv.env packaging/S99yatv "$PKG/"
+cp packaging/run.sh packaging/yatv.env packaging/S99yatv packaging/install.sh "$PKG/"
 # A checkout on Windows has CRLF: the speaker's /bin/sh cannot run such a script.
-for f in run.sh yatv.env S99yatv; do
+for f in run.sh yatv.env S99yatv install.sh; do
     tr -d '\r' < "$PKG/$f" > "$PKG/$f.new" && mv "$PKG/$f.new" "$PKG/$f"
 done
-chmod 755 "$PKG/yatv" "$PKG/run.sh" "$PKG/S99yatv"
+chmod 755 "$PKG/yatv" "$PKG/run.sh" "$PKG/S99yatv" "$PKG/install.sh"
 sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1 | tr -d '\r' > "$PKG/VERSION"
 (cd "$PKG" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort \
     | while read -r f; do sha256sum "$f"; done > SHA256SUMS)
