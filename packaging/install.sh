@@ -52,6 +52,12 @@ EOF
     chmod 755 /data/opt/soundya/run.sh && installed=1
 fi
 if [ "$installed" = 0 ] && [ -x /data/alice-homebrew/start.sh ] && [ -w /data/alice-homebrew/start.sh ]; then
+    # YATV hears Alice's phrases through IPC: alice-homebrew must run with
+    # --managed, otherwise it never publishes recognized phrases and yatv is deaf.
+    if grep -q 'alice-homebrew station' /data/alice-homebrew/start.sh && ! grep -q -- '--managed' /data/alice-homebrew/start.sh; then
+        cp /data/alice-homebrew/start.sh /data/alice-homebrew/start.sh.no-managed-backup
+        sed -i 's/station --listen :8088 --data "$BASE\/state"/station --listen :8088 --data "$BASE\/state" --hardware-led --managed/' /data/alice-homebrew/start.sh
+    fi
     if ! grep -q YATV_AUTOSTART /data/alice-homebrew/start.sh; then
         cp /data/alice-homebrew/start.sh /data/alice-homebrew/start.sh.yatv-backup
         # Add exactly one hook after the Alice PID is recorded (BusyBox-safe).
