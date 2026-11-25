@@ -53,4 +53,5 @@ jobs:
           files: |
             dist/yatv-armv7.tar
             dist/yatv-aarch64.tar
-          generate_release_notes: true
+          generate_release_notes: false
+          body_path: CHANGELOG.md

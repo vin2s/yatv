@@ -109,6 +109,20 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
                 }
             }
         }
+        ("GET", "/api/export") => {
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            let _ = tx.send(Cmd::Transfer("export".into(), String::new(), reply_tx));
+            let answer = reply_rx.recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap_or_else(|_| "error: timeout".into());
+            ("200 OK", "application/json; charset=utf-8", answer)
+        }
+        ("POST", "/api/import") => {
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            let _ = tx.send(Cmd::Transfer("import".into(), body.clone(), reply_tx));
+            let answer = reply_rx.recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap_or_else(|_| "error: timeout".into());
+            ("200 OK", "text/plain; charset=utf-8", answer)
+        }
         ("POST", "/api/update") => {
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             let command = body.trim().to_owned();

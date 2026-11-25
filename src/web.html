@@ -275,6 +275,16 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
 </div>
 </div><!-- /tab-brief -->
 
+<h2>Перенос настроек</h2>
+<div class="card">
+  <p class="hint">Скачайте конфиг с одной колонки и загрузите на другую — перенесутся телевизоры, фразы, планы, настройки сводки и Google. Секреты (ключ Google) едут в файле — не публикуйте его.</p>
+  <div class="row">
+    <a class="ghost" href="/api/export" download="yatv-config.json" style="text-decoration:none;display:inline-block;padding:9px 11px">Скачать конфиг</a>
+    <input type="file" id="cfgfile" accept=".json,application/json" onchange="importConfig(this)">
+  </div>
+  <div class="msg" id="cfgmsg"></div>
+</div>
+
 <h2>Обновление YATV</h2>
 <div class="card">
   <p class="hint" id="updstate">Проверка версии…</p>
@@ -776,6 +786,15 @@ async function saveAll() {
   const r = await postJSON('/api/settings', { tvs, phrases });
   show('tvmsg', r, r.startsWith('error')); show('phrasemsg', r, r.startsWith('error'));
   await load();
+}
+async function importConfig(input) {
+  const f = input.files && input.files[0]; input.value = '';
+  if (!f) return;
+  if (f.size > 2000000) { show('cfgmsg', 'error: файл слишком большой', true); return; }
+  show('cfgmsg', 'Импортирую…');
+  const r = await post('/api/import', await f.text());
+  show('cfgmsg', r, r.startsWith('error'));
+  if (!r.startsWith('error')) { await load(); }
 }
 async function updateAction(what) {
   show('updmsg', what === 'check' ? 'Проверяю…' : 'Устанавливаю…');

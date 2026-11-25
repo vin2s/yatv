@@ -19,11 +19,12 @@ mod settings;
 mod sha256;
 mod voice;
 mod tv;
+mod transfer;
 mod update;
 
 use std::{path::PathBuf, sync::mpsc::{self, Receiver, Sender}, thread, time::Duration};
 
-pub const VERSION: &str = "0.2.5";
+pub const VERSION: &str = "0.2.6";
 pub const DEFAULT_PORT: u16 = 8766;
 
 /// Shared update checker (the panel and the background watcher use it).
@@ -46,6 +47,8 @@ pub enum Cmd {
     Settings(serde_json::Value, Sender<String>),
     /// Update check/install from the panel or the background watcher.
     Update(String, Sender<String>),
+    /// Export/import the whole configuration between speakers.
+    Transfer(String, String, Sender<String>),
     /// Stop the daemon.
     Stop,
 }
@@ -116,6 +119,28 @@ fn controller(dir: PathBuf, rx: Receiver<Cmd>) {
     while let Ok(cmd) = rx.recv() {
         match cmd {
             Cmd::Stop => break,
+            Cmd::Transfer(what, body, reply) => {
+                let answer = match what.as_str() {
+                    "export" => transfer::export(&dir).to_string(),
+                    "import" => match transfer::import(&dir, &body) {
+                        Ok(v) => {
+                            // Re-apply the in-memory state without a restart.
+                            let s = settings::Settings::load(&dir);
+                            planner::configure(true, s.extra.get("tz_offset").and_then(|v| v.as_i64()).unwrap_or(180) as i32);
+                            apply_planner(&s);
+                            apply_google(&s);
+                            tv::set_phrases(s.phrase_list());
+                            tv::set_search_apps(s.tvs.iter().filter(|t| !t.host.is_empty() && !t.search_app.is_empty())
+                                .map(|t| (t.host.clone(), t.search_app.clone())).collect());
+                            calendar::wake();
+                            format!("OK: конфигурация импортирована: {}", v)
+                        }
+                        Err(e) => format!("error: {e}"),
+                    },
+                    _ => "usage: export | import <json>".into(),
+                };
+                let _ = reply.send(answer);
+            }
             Cmd::Update(what, reply) => {
                 let answer = match what.as_str() {
                     "check" => match updates().check() {
