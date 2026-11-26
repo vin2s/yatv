@@ -135,6 +135,12 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
                 }
             }
         }
+        ("POST", "/api/debug/phrase") => {
+            // Dry-run of the voice pipeline: shows which engine owns a phrase
+            // without cancelling Alice or starting a brief.
+            let json = crate::classify_phrase(&body.trim().to_lowercase().replace('ё', "е"));
+            ("200 OK", "application/json", json.to_string())
+        }
         ("POST", "/api/cmd") => {
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             let command = body.trim().to_owned();

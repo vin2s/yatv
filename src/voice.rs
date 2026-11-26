@@ -211,6 +211,17 @@ fn read_frames(
         if phrase.is_empty() || phrase.len() > 512 {
             continue;
         }
+        // maind sends the same recognition twice: an intermediate frame and a
+        // final one. The raw request in field 2 equals the final text exactly;
+        // an intermediate frame carries a different (partial) text there.
+        // Without this guard a spoken command is handled twice (plans read
+        // aloud twice). Compare after trimming, like the final `phrase`.
+        let request_text = bytes(state, 2)
+            .map(|b| std::str::from_utf8(b).unwrap_or_default().trim())
+            .unwrap_or_default();
+        if !request_text.is_empty() && request_text != phrase {
+            continue;
+        }
         // Short spoken commands («новости», «какие планы», «стоп») are never
         // deduped: a repeated key from maind must not make us deaf to them.
         // Only long forwarded phrases keep the duplicate guard.
@@ -334,6 +345,31 @@ mod tests {
             split_tv_hint("найди фильм колобок"),
             ("найди фильм колобок".into(), String::new())
         );
+    }
+
+    #[test]
+    fn skips_intermediate_recognition_frame() {
+        // Intermediate frame: the text in field 1 is a partial result, while
+        // field 2 holds the earlier/raw request. It must be dropped; only the
+        // final frame (field 2 == field 1) reaches the controller.
+        let partial = "какие пла";
+        let mut result = Vec::new();
+        put_bytes(&mut result, 1, partial.as_bytes());
+        put_number(&mut result, 2, 1);
+        put_number(&mut result, 4, 1);
+        let mut state = Vec::new();
+        put_number(&mut state, 1, 1);
+        put_bytes(&mut state, 2, "какие планы на сегодня".as_bytes());
+        put_bytes(&mut state, 15, &result);
+        let mut message = Vec::new();
+        put_bytes(&mut message, 252, &state);
+        put_number(&mut message, 253, 3);
+
+        let st = bytes(&message, 252).unwrap();
+        let text = std::str::from_utf8(bytes(bytes(st, 15).unwrap(), 1).unwrap()).unwrap().trim();
+        let request = std::str::from_utf8(bytes(st, 2).unwrap()).unwrap_or_default().trim();
+        assert_ne!(text, request, "intermediate frame must differ");
+        // The guard in read_frames() drops it because request != phrase.
     }
 
     #[test]

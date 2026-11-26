@@ -24,7 +24,7 @@ mod update;
 
 use std::{path::PathBuf, sync::mpsc::{self, Receiver, Sender}, thread, time::Duration};
 
-pub const VERSION: &str = "0.2.6";
+pub const VERSION: &str = "0.2.7";
 pub const DEFAULT_PORT: u16 = 8766;
 
 /// Shared update checker (the panel and the background watcher use it).
@@ -377,12 +377,72 @@ fn planner_text(text: &str) -> String {
     t.trim_end_matches(['?', '!', '.']).trim().to_owned()
 }
 
+/// Pure classification of a phrase, used by the debug panel. The live
+/// `Cmd::Phrase` handler below mirrors this order; keep them in sync.
+pub fn classify_phrase(phrase: &str) -> serde_json::Value {
+    let s = settings::Settings::load(&crate::state_dir());
+    let trigger = brief::trigger_from(&s);
+    let brief_on = s.extra.get("brief_on").and_then(|v| v.as_bool()).unwrap_or(true);
+    let said_text = planner_text(phrase);
+
+    let stop = ["стоп", "стоп сводка", "останови сводку", "хватит"].contains(&said_text.as_str());
+    if stop {
+        return serde_json::json!({
+            "owner": if brief::is_active() { "yatv" } else { "alice" },
+            "route": "stop",
+            "brief_active": brief::is_active(),
+            "detail": if brief::is_active() { "YATV остановит сводку" } else { "сводки нет — фраза остаётся Алисе" },
+        });
+    }
+    if brief::is_trigger(phrase, &trigger) && brief_on {
+        return serde_json::json!({
+            "owner": "yatv", "route": "brief",
+            "detail": "запущена утренняя сводка (новости/погода/планы)",
+        });
+    }
+    let plan_intent = planner::voice(&said_text);
+    if plan_intent.is_some() {
+        if matches!(plan_intent, Some(planner::Voice::Remind(_))) {
+            return serde_json::json!({
+                "owner": "alice", "route": "remind",
+                "detail": "напоминания остаются штатной Алисе",
+            });
+        }
+        return serde_json::json!({
+            "owner": "yatv", "route": "planner",
+            "detail": "планировщик: фраза из белого списка",
+        });
+    }
+    let parsed = parse::parse(&said_text);
+    if parsed.is_some() {
+        return serde_json::json!({
+            "owner": "yatv", "route": "tv",
+            "detail": format!("команда ТВ: {:?}", parsed),
+        });
+    }
+    // A phrase explicitly configured in the panel is YATV's too.
+    let lower = said_text.to_lowercase();
+    let configured = s.phrases.iter().any(|p| {
+        p.phrase.to_lowercase().split([',', ';']).any(|v| !v.trim().is_empty() && lower.contains(v.trim()))
+    });
+    if configured {
+        return serde_json::json!({
+            "owner": "yatv", "route": "phrase",
+            "detail": "совпадает с фразой из настроек ТВ",
+        });
+    }
+    serde_json::json!({
+        "owner": "alice", "route": "alice",
+        "detail": "YATV не распознал — фраза остаётся Алисе",
+    })
+}
+
 /// The panel's `plan …` commands.
 fn plan_command(command: &str) -> String {
     let (what, rest) = command.split_once(' ').unwrap_or((command, ""));
     // Read-only panel commands («json», «text», «brief json», …) are polled
     // constantly — logging them would push the real events out of the journal.
-    let noisy = matches!(what, "json" | "text" | "speak" | "brief") && rest.trim() != "test";
+    let noisy = matches!(what, "json" | "text" | "speak") && rest.trim() != "test";
     let answer = plan_dispatch(what, rest);
     if !noisy {
         log::add(&crate::state_dir(), "cmd", &format!("{what} {}", redact(&answer)));
@@ -471,6 +531,21 @@ fn plan_dispatch(what: &str, rest: &str) -> String {
         "calendar" => {
             calendar::wake();
             "OK: обновляю календарь".into()
+        }
+        "syncspeak" => {
+            // «Обновить и прочитать вслух»: refresh Google data, then read the
+            // current plan view aloud. calendar::wake() refreshes in the
+            // background; agenda_text() reads the freshest local cache now.
+            calendar::wake();
+            let ask = match rest.trim() {
+                "tomorrow" => planner::Ask::Plans(1),
+                "week" => planner::Ask::Week,
+                "deadlines" => planner::Ask::Deadlines,
+                _ => planner::Ask::Plans(0),
+            };
+            let text = planner::agenda_text(ask, planner::now(), planner::offset());
+            voice::say(text.clone());
+            format!("OK: обновляю и читаю вслух: {}", text)
         }
         "brief" => {
             let s = settings::Settings::load(&crate::state_dir());
@@ -623,7 +698,10 @@ fn plan_dispatch(what: &str, rest: &str) -> String {
             }
         }
         "text" | "speak" => {
+            // `today` is what the panel sends for its current view; keep it
+            // alongside the other view names (the default already meant today).
             let ask = match rest.trim() {
+                "today" => planner::Ask::Plans(0),
                 "tomorrow" => planner::Ask::Plans(1),
                 "week" => planner::Ask::Week,
                 "deadlines" => planner::Ask::Deadlines,
@@ -731,6 +809,20 @@ mod plan_tests {
     fn plan_say_adds_a_task() {
         let r = plan_command("say добавь задачу купить хлеб завтра в 10");
         assert!(!r.starts_with("error"), "{r}");
+    }
+
+    #[test]
+    fn debug_classifies_owned_and_alice_phrases() {
+        // A planner phrase belongs to YATV; a reminder stays with Alice.
+        let plans = classify_phrase("какие планы на сегодня");
+        assert_eq!(plans["owner"], "yatv");
+        assert_eq!(plans["route"], "planner");
+        let remind = classify_phrase("напомни позвонить врачу");
+        assert_eq!(remind["owner"], "alice");
+        assert_eq!(remind["route"], "remind");
+        // With no active brief, «стоп» is Alice's.
+        let stop = classify_phrase("стоп");
+        assert_eq!(stop["owner"], "alice");
     }
 }
 

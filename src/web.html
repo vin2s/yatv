@@ -102,6 +102,7 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
   <button data-tab="tv" class="on" onclick="setTab('tv')">ТВ</button>
   <button data-tab="plans" onclick="setTab('plans')">Планы</button>
   <button data-tab="brief" onclick="setTab('brief')">Сводка</button>
+  <button data-tab="test" onclick="setTab('test')">Тест</button>
 </div>
 <div id="tab-tv">
 
@@ -142,8 +143,7 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
 <div class="card">
   <p class="hint">Голосом: «добавь задачу сдать отчёт завтра до 18:00», «какие у меня сегодня планы», «что мне нужно сделать», «что дальше», «отметь выполненной …». Фразы «напомни…» остаются штатной Алисе — её напоминания приходят на все колонки сразу. Остальные фразы — тоже Алисе.</p>
   <div class="row">
-    <button class="ghost" onclick="loadPlans()">Обновить</button>
-    <button class="ghost" id="planspeak" onclick="planCmd('speak ' + planView)">Сказать вслух</button>
+    <button id="planspeak" onclick="syncSpeak()">Обновить и прочитать вслух</button>
   </div>
   <div class="seg" id="planview">
     <button data-v="today" class="on" onclick="setPlanView('today')">Сегодня</button>
@@ -275,6 +275,23 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
 </div>
 </div><!-- /tab-brief -->
 
+<div id="tab-test" hidden>
+<h2>Отладка фраз</h2>
+<div class="card">
+  <p class="hint">Введите фразу — покажем, кто её обработает: YATV (планы/сводка/ТВ/настроенная фраза) или штатная Алиса. Это «сухой прогон»: Алиса не отменяется, сводка не запускается.</p>
+  <div class="row">
+    <input id="dbgphrase" placeholder="какие планы на сегодня" onkeydown="if(event.key==='Enter')debugPhrase()">
+    <button onclick="debugPhrase()">Проверить</button>
+  </div>
+  <pre id="dbgresult" style="white-space:pre-wrap;color:var(--dim);margin:8px 0 0"></pre>
+</div>
+
+<h2>Журнал (последние 200, с отладкой)</h2>
+<div class="card">
+  <div class="row"><button class="ghost" onclick="loadJournal()">Обновить</button><button class="danger" onclick="clearJournal()">Очистить</button></div>
+  <div id="log" style="color:var(--dim);margin:8px 0 0;max-height:360px;overflow:auto"></div>
+</div>
+
 <h2>Перенос настроек</h2>
 <div class="card">
   <p class="hint">Скачайте конфиг с одной колонки и загрузите на другую — перенесутся телевизоры, фразы, планы, настройки сводки и Google. Секреты (ключ Google) едут в файле — не публикуйте его.</p>
@@ -296,13 +313,9 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
     <small>Другие колонки получат уведомление и поставят новую версию сами.</small></span></label>
   <div class="msg" id="updmsg"></div>
 </div>
+</div><!-- /tab-test -->
 
-<h2>Журнал (последние 200, с отладкой)</h2>
-<div class="card">
-  <div class="row"><button class="ghost" onclick="loadJournal()">Обновить</button><button class="danger" onclick="clearJournal()">Очистить</button></div>
-  <div id="log" style="color:var(--dim);margin:8px 0 0;max-height:360px;overflow:auto"></div>
-</div>
-</div>
+</div><!-- /wrap -->
 <script>
 const $ = id => document.getElementById(id);
 const state = { tvs: [], phrases: [], appsByHost: {} };
@@ -316,9 +329,11 @@ function setTab(tab) {
   $('tab-tv').hidden = tab !== 'tv';
   $('tab-plans').hidden = tab !== 'plans';
   $('tab-brief').hidden = tab !== 'brief';
+  $('tab-test').hidden = tab !== 'test';
   document.querySelectorAll('#toptabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   if (tab === 'plans') loadPlans();
   else if (tab === 'brief') loadBrief();
+  else if (tab === 'test') loadJournal();
 }
 let savedTheme = 'light';
 try { savedTheme = localStorage.getItem('yatv-theme') || 'light'; } catch (e) {}
@@ -338,6 +353,22 @@ function setPlanView(v) {
   document.querySelectorAll('#planview button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   loadPlans();
 }
+async function syncSpeak() {
+  const b = $('planspeak');
+  b.disabled = true;
+  show('planmsg', 'Обновляю календарь и читаю планы вслух…');
+  try {
+    const r = await planCmd('syncspeak ' + planView);
+    show('planmsg', r, r.startsWith('error'));
+    // Refresh the visible list with the same data we just read aloud.
+    if (!r.startsWith('error')) loadPlans();
+  } catch (e) {
+    show('planmsg', 'error: ' + e, true);
+  } finally {
+    b.disabled = false;
+  }
+}
+
 async function planCmd(text) {
   const r = await post('/api/plan', text);
   return r;
@@ -814,6 +845,19 @@ function loadUpdate() {
     ? 'Доступна версия ' + u.latest + ' (сейчас ' + u.current + '). Нажмите «Установить обновление»'
     : 'Версия ' + u.current + ' — актуальна.' + (u.state ? ' ' + u.state : '');
 }
+async function debugPhrase() {
+  const phrase = $('dbgphrase').value.trim();
+  if (!phrase) { $('dbgresult').textContent = 'Введите фразу'; return; }
+  $('dbgresult').textContent = 'Проверяю…';
+  try {
+    const r = await (await fetch('/api/debug/phrase', { method:'POST', body:phrase })).json();
+    const owner = r.owner === 'yatv' ? 'YATV' : (r.owner === 'alice' ? 'Алиса' : String(r.owner));
+    $('dbgresult').textContent = `Фраза: ${phrase}\nКто обрабатывает: ${owner}\nМаршрут: ${r.route}\n${r.detail}`;
+  } catch (e) {
+    $('dbgresult').textContent = 'Ошибка: ' + e;
+  }
+}
+
 async function loadJournal() {
   const j = await (await fetch('/api/status')).json();
   // /api/status already returns the newest entries first (log::latest()).
@@ -841,7 +885,9 @@ function formatTime(t) {
   return t || '';
 }
 load();
-setInterval(() => { if (!document.hidden) loadJournal(); }, 10000);
+setInterval(() => {
+  if (!document.hidden && !$('tab-test').hidden) loadJournal();
+}, 10000);
 </script>
 </body>
 </html>
