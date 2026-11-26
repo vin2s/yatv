@@ -225,6 +225,10 @@ fn read_frames(
         // Short spoken commands («новости», «какие планы», «стоп») are never
         // deduped: a repeated key from maind must not make us deaf to them.
         // Only long forwarded phrases keep the duplicate guard.
+        // DEV TRACE: see which fields distinguish the two copies of a phrase.
+        eprintln!("voice: frame text={phrase:?} field2={:?} field7={:?}",
+            bytes(state, 2).and_then(|b| std::str::from_utf8(b).ok()),
+            bytes(state, 7).and_then(|b| std::str::from_utf8(b).ok()));
         if phrase.len() > 60 {
             let request_key = bytes(state, 2).map(|b| b.to_vec()).unwrap_or_default();
             let fingerprint = [request_key.as_slice(), phrase.as_bytes()].concat();
