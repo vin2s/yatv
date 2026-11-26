@@ -211,34 +211,19 @@ fn read_frames(
         if phrase.is_empty() || phrase.len() > 512 {
             continue;
         }
-        // maind sends the same recognition twice: an intermediate frame and a
-        // final one. The raw request in field 2 equals the final text exactly;
-        // an intermediate frame carries a different (partial) text there.
-        // Without this guard a spoken command is handled twice (plans read
-        // aloud twice). Compare after trimming, like the final `phrase`.
-        let request_text = bytes(state, 2)
-            .map(|b| std::str::from_utf8(b).unwrap_or_default().trim())
-            .unwrap_or_default();
-        if !request_text.is_empty() && request_text != phrase {
+        // maind sends the SAME final frame twice with one request-id (field 7).
+        // Deduplicate by that id for every phrase — including short commands.
+        // The old guard only deduped phrases longer than 60 chars, so «какие
+        // планы» was handled (and spoken) twice. Keep a bounded window.
+        let request_key = bytes(state, 7)
+            .map(|b| b.to_vec())
+            .unwrap_or_else(|| [bytes(state, 2).unwrap_or_default(), phrase.as_bytes()].concat());
+        if !request_key.is_empty() && seen.contains(&request_key) {
             continue;
         }
-        // Short spoken commands («новости», «какие планы», «стоп») are never
-        // deduped: a repeated key from maind must not make us deaf to them.
-        // Only long forwarded phrases keep the duplicate guard.
-        // DEV TRACE: see which fields distinguish the two copies of a phrase.
-        eprintln!("voice: frame text={phrase:?} field2={:?} field7={:?}",
-            bytes(state, 2).and_then(|b| std::str::from_utf8(b).ok()),
-            bytes(state, 7).and_then(|b| std::str::from_utf8(b).ok()));
-        if phrase.len() > 60 {
-            let request_key = bytes(state, 2).map(|b| b.to_vec()).unwrap_or_default();
-            let fingerprint = [request_key.as_slice(), phrase.as_bytes()].concat();
-            if !request_key.is_empty() && seen.contains(&fingerprint) {
-                continue;
-            }
-            seen.push_back(fingerprint);
-            if seen.len() > 128 {
-                seen.pop_front();
-            }
+        seen.push_back(request_key);
+        if seen.len() > 64 {
+            seen.pop_front();
         }
         let full = normalize(&phrase);
         if full.is_empty() {
@@ -372,28 +357,29 @@ mod tests {
     }
 
     #[test]
-    fn skips_intermediate_recognition_frame() {
-        // Intermediate frame: the text in field 1 is a partial result, while
-        // field 2 holds the earlier/raw request. It must be dropped; only the
-        // final frame (field 2 == field 1) reaches the controller.
-        let partial = "какие пла";
+    fn repeated_frame_has_same_request_id() {
+        // maind sends the identical final frame twice with the same request-id
+        // in field 7. The dedup must key on that id, so a repeated short
+        // phrase («какие планы») is not handled twice.
+        let request_id = b"5e4bb45f-4365-431a-aa45-7dfbe545e069";
+        let phrase = "какие планы на завтра";
         let mut result = Vec::new();
-        put_bytes(&mut result, 1, partial.as_bytes());
+        put_bytes(&mut result, 1, phrase.as_bytes());
         put_number(&mut result, 2, 1);
         put_number(&mut result, 4, 1);
         let mut state = Vec::new();
         put_number(&mut state, 1, 1);
-        put_bytes(&mut state, 2, "какие планы на сегодня".as_bytes());
+        put_bytes(&mut state, 2, phrase.as_bytes());
+        put_bytes(&mut state, 7, request_id);
         put_bytes(&mut state, 15, &result);
         let mut message = Vec::new();
         put_bytes(&mut message, 252, &state);
         put_number(&mut message, 253, 3);
 
         let st = bytes(&message, 252).unwrap();
-        let text = std::str::from_utf8(bytes(bytes(st, 15).unwrap(), 1).unwrap()).unwrap().trim();
-        let request = std::str::from_utf8(bytes(st, 2).unwrap()).unwrap_or_default().trim();
-        assert_ne!(text, request, "intermediate frame must differ");
-        // The guard in read_frames() drops it because request != phrase.
+        assert_eq!(bytes(st, 2), Some(phrase.as_bytes()));
+        assert_eq!(bytes(st, 7), Some(&request_id[..]));
+        // Two frames with this id → the second one is dropped by read_frames().
     }
 
     #[test]
