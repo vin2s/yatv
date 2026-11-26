@@ -315,6 +315,7 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
 <h2>Обновление YATV</h2>
 <div class="card">
   <p class="hint" id="updstate">Проверка версии…</p>
+  <pre id="updnotes" style="white-space:pre-wrap;color:var(--dim);margin:8px 0 0;max-height:260px;overflow:auto"></pre>
   <div class="row">
     <button class="ghost" onclick="updateAction('check')">Проверить</button>
     <button onclick="updateAction('install')">Установить обновление</button>
@@ -853,6 +854,8 @@ async function updateAction(what) {
   show('updmsg', what === 'check' ? 'Проверяю…' : 'Устанавливаю…');
   const r = await post('/api/update', what);
   show('updmsg', r, r.startsWith('error'));
+  // Refresh notes from /api/status right away (check() caches them).
+  settings = await (await fetch('/api/status')).json();
   loadUpdate();
 }
 async function saveUpdateAuto() {
@@ -861,6 +864,11 @@ async function saveUpdateAuto() {
 function loadUpdate() {
   const u = (settings.update || {});
   $('update_auto').checked = settings.update_auto !== false;
+  // «Что изменилось» is shown both when a version is available and when the
+  // current one is already installed.
+  $('updnotes').textContent = u.notes
+    ? 'Что изменилось:\n' + u.notes
+    : (u.available ? 'Описание обновления не получено (GitHub API недоступен).' : '');
   if (u.installing) { $('updstate').textContent = 'Идёт установка обновления…'; return; }
   if (u.error) { $('updstate').textContent = 'Ошибка: ' + u.error; return; }
   $('updstate').textContent = u.available

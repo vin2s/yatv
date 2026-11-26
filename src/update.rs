@@ -87,6 +87,24 @@ fn fetch_latest() -> Result<(String, String), String> {
     Ok((version, String::new()))
 }
 
+/// Release notes + asset link from the API. The redirect check is cheap and
+/// API-limit-free, but gives no description; this fills it in (best effort) so
+/// the panel can show «что изменилось» before installing.
+fn fetch_details() -> (String, String) {
+    let agent = match crate::google::agent() { Ok(a) => a, Err(_) => return (String::new(), String::new()) };
+    let resp = match agent.get(RELEASES).set("User-Agent", "yatv").timeout(Duration::from_secs(15)).call() {
+        Ok(r) => r, Err(_) => return (String::new(), String::new())
+    };
+    let v: Value = match resp.into_json() {
+        Ok(v) => v, Err(_) => return (String::new(), String::new())
+    };
+    let notes = v.get("body").and_then(Value::as_str).unwrap_or("").chars().take(1500).collect();
+    let api = v.get("assets").and_then(Value::as_array).and_then(|a| a.iter()
+        .find(|x| x.get("name").and_then(Value::as_str) == Some(asset()))
+        .and_then(|x| x.get("url").and_then(Value::as_str).map(str::to_owned))).unwrap_or_default();
+    (notes, api)
+}
+
 impl Updates {
     pub fn due(&self) -> bool {
         self.checked.lock().unwrap().map_or(true, |t| t.elapsed() > EVERY)
@@ -94,25 +112,18 @@ impl Updates {
 
     pub fn check(&self) -> Result<Option<Release>, String> {
         *self.checked.lock().unwrap() = Some(Instant::now());
-        let (version, notes, api_url) = match fetch_latest() {
-            Ok((version, notes)) => {
-                // The asset's API URL uses api.github.com (trusted by webpki),
-                // unlike the browser_download_url redirect to objects.githubusercontent.com.
-                let api = crate::google::agent().ok().and_then(|a| {
-                    a.get(RELEASES).set("User-Agent", "yatv").timeout(Duration::from_secs(15)).call().ok()
-                }).and_then(|r| r.into_json().ok()).and_then(|v: Value| {
-                    v.get("assets")?.as_array()?.iter().find(|a| {
-                        a.get("name").and_then(Value::as_str) == Some(asset())
-                    })?.get("url").and_then(Value::as_str).map(str::to_owned)
-                }).unwrap_or_default();
-                (version, notes, api)
-            }
+        let (version, mut notes) = match fetch_latest() {
+            Ok(v) => v,
             Err(e) => {
                 eprintln!("update: cannot check: {e}");
                 *self.error.lock().unwrap() = Some(e.clone());
                 return Err(e);
             }
         };
+        // The redirect path has no notes and no asset link; fill both from the
+        // API once per check (best effort — the redirect still decides version).
+        let (api_notes, api_url) = fetch_details();
+        if notes.is_empty() { notes = api_notes; }
         *self.error.lock().unwrap() = None;
         let rel = Release {
             version: version.clone(), notes,

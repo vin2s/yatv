@@ -24,7 +24,7 @@ mod update;
 
 use std::{path::PathBuf, sync::mpsc::{self, Receiver, Sender}, thread, time::Duration};
 
-pub const VERSION: &str = "0.2.8";
+pub const VERSION: &str = "0.2.9";
 pub const DEFAULT_PORT: u16 = 8766;
 
 /// Shared update checker (the panel and the background watcher use it).

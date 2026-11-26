@@ -140,6 +140,10 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
             // would handle it (and to whom it is handed over).
             let text = body.trim();
             let json = crate::classify_phrase(text);
+            // Keep a trace in the journal so the test is visible there too.
+            crate::log::add(&crate::state_dir(), "debug", &format!(
+                "сказал фразу {text:?} → {}, {}", json["owner"], json["route"]
+            ));
             crate::voice::say(text.to_owned());
             let answer = serde_json::json!({
                 "phrase": text,
@@ -153,7 +157,11 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
         ("POST", "/api/debug/phrase") => {
             // Dry-run of the voice pipeline: shows which engine owns a phrase
             // without cancelling Alice or starting a brief.
-            let json = crate::classify_phrase(&body.trim().to_lowercase().replace('ё', "е"));
+            let text = body.trim();
+            let json = crate::classify_phrase(&text.to_lowercase().replace('ё', "е"));
+            crate::log::add(&crate::state_dir(), "debug", &format!(
+                "проверка фразы {text:?} → {}, {}", json["owner"], json["route"]
+            ));
             ("200 OK", "application/json", json.to_string())
         }
         ("POST", "/api/cmd") => {
