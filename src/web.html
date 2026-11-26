@@ -895,8 +895,8 @@ async function sayPhrase() {
   try {
     const r = await (await fetch('/api/debug/say', { method:'POST', body:phrase })).json();
     const owner = r.owner === 'yatv' ? 'YATV' : (r.owner === 'alice' ? 'Алиса' : String(r.owner));
-    const handed = r.owner === 'yatv' ? 'отдана YATV' : 'отдана штатной Алисе';
-    $('sayresult').textContent = `Сказано вслух: «${r.phrase}»\nКто обработал: ${owner}\nКому отдана: ${handed}\nМаршрут: ${r.route}\n${r.detail}`;
+    const handed = r.owner === 'yatv' ? 'выполнил YATV' : 'отдана штатной Алисе';
+    $('sayresult').textContent = `Фраза: «${r.phrase}»\nКто обработал: ${owner}\nКому отдана: ${handed}\nМаршрут: ${r.route}\nОзвучено: «${r.spoken}»\n${r.detail}`;
   } catch (e) {
     $('sayresult').textContent = 'Ошибка: ' + e;
   }

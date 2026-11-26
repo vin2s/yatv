@@ -1119,7 +1119,23 @@ pub fn voice(text: &str) -> Option<Voice> {
     }
     let plans = ["какие планы", "какие у меня планы", "что у меня сегодня", "что у меня завтра", "что у меня на", "что запланировано", "мои планы", "что по планам", "какие дела", "какие у меня дела"];
     if plans.iter().any(|p| text.starts_with(p) || bare.starts_with(p)) {
-        return Some(Voice::Ask(Ask::Plans(day - today)));
+        // A phrase like «какие планы жизнь» starts with «какие планы» but is
+        // nonsense — it must stay with Alice. Accept only a day/period tail
+        // (сегодня, завтра, на понедельник, на этой неделе) or a bare question.
+        let matched = plans.iter().find(|p| text.starts_with(**p) || bare.starts_with(**p)).copied().unwrap_or("");
+        let tail = text.strip_prefix(matched).unwrap_or("").trim().trim_matches(['?', '!', '.']).trim();
+        let tail = tail.strip_prefix("у меня").unwrap_or(tail).trim();
+        // Every tail word must be a day/period word. «на завтра кофе» has an
+        // unknown word «кофе» and stays with Alice.
+        let day_words = ["сегодня", "завтра", "послезавтра", "сейчас", "на", "в", "во", "эту", "этой", "следующ", "недел", "понедельник", "вторник", "сред", "четверг", "пятниц", "суббот", "воскресен", "числ", "месяц", "году", "утром", "днем", "днём", "вечером", "ночью"];
+        let tail_ok = tail.split_whitespace().all(|w| {
+            let w = w.trim_matches([',', '?', '!', '.']).to_lowercase();
+            w.is_empty() || w == "и" || w == "какие" || w == "у" || w == "меня"
+                || day_words.iter().any(|d| w.contains(d))
+        });
+        if tail.is_empty() || tail_ok {
+            return Some(Voice::Ask(Ask::Plans(day - today)));
+        }
     }
     None
 }
@@ -1450,6 +1466,10 @@ mod tests {
         assert!(matches!(voice("напомни через 5 минут выпить воды"), Some(Voice::Remind(_))));
         assert!(matches!(voice("добавь задачу купить молоко"), Some(Voice::AddTask(_))));
         assert!(matches!(voice("какие у меня сегодня планы"), Some(Voice::Ask(Ask::Plans(0)))));
+        assert!(matches!(voice("какие планы на сегодня"), Some(Voice::Ask(Ask::Plans(0)))));
+        // A nonsense tail must stay with Alice.
+        assert_eq!(voice("какие планы жизнь"), None);
+        assert_eq!(voice("какие планы на завтра кофе"), None);
         assert_eq!(voice("найди фильм колобок"), None);
         assert!(matches!(voice("добавь задачу проверить планы завтра в 10"), Some(Voice::AddTask(_))));
         assert!(matches!(voice("добавь дедлайн сдать отчёт завтра"), Some(Voice::AddTask(_))));

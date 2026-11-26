@@ -136,23 +136,42 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
             }
         }
         ("POST", "/api/debug/say") => {
-            // Test panel: say a phrase aloud through Alice and report who
-            // would handle it (and to whom it is handed over).
+            // Test panel: say a phrase aloud. If YATV owns it, run the same
+            // pipeline as a spoken command and speak the answer; otherwise
+            // just repeat the phrase (demonstration of the handover).
             let text = body.trim();
             let json = crate::classify_phrase(text);
-            // Keep a trace in the journal so the test is visible there too.
+            let owner = json["owner"].as_str().unwrap_or("alice").to_owned();
+            let mut spoken = text.to_owned();
+            let mut answer = String::new();
+            if owner == "yatv" {
+                let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+                let (phrase, hint) = if text.to_lowercase().contains("план")
+                    || text.to_lowercase().contains("задач") || text.to_lowercase().contains("напомни") {
+                    (text.to_owned(), String::new())
+                } else {
+                    crate::voice::split_tv_hint(text)
+                };
+                if tx.send(crate::Cmd::Phrase(phrase, hint, reply_tx)).is_ok() {
+                    if let Ok(a) = reply_rx.recv_timeout(std::time::Duration::from_secs(20)) {
+                        spoken = a.clone();
+                        answer = a;
+                    }
+                }
+            }
             crate::log::add(&crate::state_dir(), "debug", &format!(
-                "сказал фразу {text:?} → {}, {}", json["owner"], json["route"]
+                "сказал фразу {text:?} → {}, {}; ответ {answer:?}", json["owner"], json["route"]
             ));
-            crate::voice::say(text.to_owned());
-            let answer = serde_json::json!({
+            crate::voice::say(spoken.clone());
+            let result = serde_json::json!({
                 "phrase": text,
-                "spoken": true,
+                "spoken": spoken,
+                "answer": answer,
                 "owner": json["owner"],
                 "route": json["route"],
                 "detail": json["detail"],
             });
-            ("200 OK", "application/json", answer.to_string())
+            ("200 OK", "application/json", result.to_string())
         }
         ("POST", "/api/debug/phrase") => {
             // Dry-run of the voice pipeline: shows which engine owns a phrase
