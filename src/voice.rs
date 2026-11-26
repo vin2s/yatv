@@ -296,12 +296,13 @@ fn speak(text: &str) -> io::Result<()> {
         match socket.read_exact(&mut len) {
             Ok(()) => {}
             Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
-                // Some firmwares never send a TTS state at all. If she has
-                // already started speaking, a quiet socket is fine — but a
-                // timeout BEFORE she starts means the phrase was not taken.
-                if speaking { return Ok(()); }
-                eprintln!("say: {text:?}: Алиса не подтвердила начало речи за 5 с");
-                return Err(e);
+                // Some firmwares never send any TTS state. A timeout is not a
+                // failure; keep the socket open for the estimated speaking time.
+                let takes = Duration::from_millis(1000 + text.chars().count() as u64 * 1000 / 13);
+                if let Some(left) = takes.checked_sub(started.elapsed()) {
+                    thread::sleep(left);
+                }
+                return Ok(());
             }
             Err(e) => return Err(e),
         }
