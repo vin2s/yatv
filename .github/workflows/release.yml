@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual run builds the archives and uploads them as artifacts, without
+  # creating a Release. Used to test a fix on one speaker first.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -56,7 +59,18 @@ jobs:
             { echo "## YATV ${TAG}"; echo; echo "Обновление YATV. Подробности — в CHANGELOG.md репозитория."; } > RELEASE_BODY.md
           fi
 
+      - name: Upload test artifacts (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: yatv-test
+          path: |
+            dist/yatv-armv7.tar
+            dist/yatv-aarch64.tar
+          retention-days: 7
+
       - name: Release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           files: |

@@ -442,7 +442,7 @@ fn plan_command(command: &str) -> String {
     let (what, rest) = command.split_once(' ').unwrap_or((command, ""));
     // Read-only panel commands («json», «text», «brief json», …) are polled
     // constantly — logging them would push the real events out of the journal.
-    let noisy = matches!(what, "json" | "text" | "speak") && rest.trim() != "test";
+    let noisy = matches!(what, "json" | "text" | "speak" | "brief") && rest.trim() != "test";
     let answer = plan_dispatch(what, rest);
     if !noisy {
         log::add(&crate::state_dir(), "cmd", &format!("{what} {}", redact(&answer)));

@@ -293,6 +293,7 @@ fn speak(text: &str) -> io::Result<()> {
 
     let mut frames = rpc("AliceCapability", 20, &subscribe);
     frames.extend(rpc("AliceCapability", 8, &method));
+    crate::log::add(&crate::state_dir(), "tts", &format!("Алиса говорит: {text}"));
     socket.write_all(&frames)?;
 
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -306,7 +307,12 @@ fn speak(text: &str) -> io::Result<()> {
         match socket.read_exact(&mut len) {
             Ok(()) => {}
             Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
-                return Ok(());
+                // Some firmwares never send a TTS state at all. If she has
+                // already started speaking, a quiet socket is fine — but a
+                // timeout BEFORE she starts means the phrase was not taken.
+                if speaking { return Ok(()); }
+                eprintln!("say: {text:?}: Алиса не подтвердила начало речи за 5 с");
+                return Err(e);
             }
             Err(e) => return Err(e),
         }
@@ -325,6 +331,20 @@ fn speak(text: &str) -> io::Result<()> {
                 }
                 Some(0 | 6) if speaking => return Ok(()),
                 _ => {}
+            }
+            // The TTS events are also delivered in field 18 of the same state
+            // frame: 6 = started, 1 = completed, 4 = error. Some firmware
+            // versions only send these and never change field 1.
+            if let Some(event) = bytes(state, 18) {
+                match number(event, 1) {
+                    Some(6) => {
+                        speaking = true;
+                        let _ = socket.set_read_timeout(Some(Duration::from_secs(15)));
+                    }
+                    Some(1) if speaking => return Ok(()),
+                    Some(4) => return Err(io::Error::other("Алиса сообщила об ошибке TTS")),
+                    _ => {}
+                }
             }
         }
     }
