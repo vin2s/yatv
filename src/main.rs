@@ -24,7 +24,7 @@ mod update;
 
 use std::{path::PathBuf, sync::mpsc::{self, Receiver, Sender}, thread, time::Duration};
 
-pub const VERSION: &str = "0.2.7";
+pub const VERSION: &str = "0.2.8";
 pub const DEFAULT_PORT: u16 = 8766;
 
 /// Shared update checker (the panel and the background watcher use it).
@@ -462,6 +462,23 @@ fn redact(text: &str) -> String {
     out.chars().take(300).collect()
 }
 
+/// Panel view name → planner question. A bare integer is a day offset from
+/// today (the calendar sends the selected day that way); negative = past.
+fn parse_ask(view: &str) -> planner::Ask {
+    match view.trim() {
+        "today" => planner::Ask::Plans(0),
+        "tomorrow" => planner::Ask::Plans(1),
+        "week" => planner::Ask::Week,
+        "nextweek" => planner::Ask::NextWeek,
+        "deadlines" => planner::Ask::Deadlines,
+        "brief" => planner::Ask::Brief,
+        other => match other.parse::<i64>() {
+            Ok(d) => planner::Ask::Plans(d),
+            Err(_) => planner::Ask::Plans(0),
+        },
+    }
+}
+
 fn plan_dispatch(what: &str, rest: &str) -> String {
     match what {
         "json" => {
@@ -534,15 +551,10 @@ fn plan_dispatch(what: &str, rest: &str) -> String {
         }
         "syncspeak" => {
             // «Обновить и прочитать вслух»: refresh Google data, then read the
-            // current plan view aloud. calendar::wake() refreshes in the
-            // background; agenda_text() reads the freshest local cache now.
+            // chosen day aloud. A bare integer is a day offset from today
+            // (the calendar panel sends the selected day that way).
             calendar::wake();
-            let ask = match rest.trim() {
-                "tomorrow" => planner::Ask::Plans(1),
-                "week" => planner::Ask::Week,
-                "deadlines" => planner::Ask::Deadlines,
-                _ => planner::Ask::Plans(0),
-            };
+            let ask = parse_ask(rest.trim());
             let text = planner::agenda_text(ask, planner::now(), planner::offset());
             voice::say(text.clone());
             format!("OK: обновляю и читаю вслух: {}", text)
@@ -698,16 +710,7 @@ fn plan_dispatch(what: &str, rest: &str) -> String {
             }
         }
         "text" | "speak" => {
-            // `today` is what the panel sends for its current view; keep it
-            // alongside the other view names (the default already meant today).
-            let ask = match rest.trim() {
-                "today" => planner::Ask::Plans(0),
-                "tomorrow" => planner::Ask::Plans(1),
-                "week" => planner::Ask::Week,
-                "deadlines" => planner::Ask::Deadlines,
-                "brief" => planner::Ask::Brief,
-                _ => planner::Ask::Plans(0),
-            };
+            let ask = parse_ask(rest.trim());
             let text = planner::agenda_text(ask, planner::now(), planner::offset());
             if what == "speak" {
                 voice::say(text);

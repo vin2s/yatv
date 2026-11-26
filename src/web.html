@@ -286,6 +286,16 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
   <pre id="dbgresult" style="white-space:pre-wrap;color:var(--dim);margin:8px 0 0"></pre>
 </div>
 
+<h2>Сказать фразу вслух</h2>
+<div class="card">
+  <p class="hint">Введите фразу — колонка скажет её голосом Алисы, а ниже покажем, кто бы её обработал (YATV или штатная Алиса) и кому она отдана.</p>
+  <div class="row">
+    <input id="sayphrase" placeholder="какие планы на сегодня" onkeydown="if(event.key==='Enter')sayPhrase()">
+    <button onclick="sayPhrase()">Сказать</button>
+  </div>
+  <pre id="sayresult" style="white-space:pre-wrap;color:var(--dim);margin:8px 0 0"></pre>
+</div>
+
 <h2>Журнал (последние 200, с отладкой)</h2>
 <div class="card">
   <div class="row"><button class="ghost" onclick="loadJournal()">Обновить</button><button class="danger" onclick="clearJournal()">Очистить</button></div>
@@ -358,7 +368,19 @@ async function syncSpeak() {
   b.disabled = true;
   show('planmsg', 'Обновляю календарь и читаю планы вслух…');
   try {
-    const r = await planCmd('syncspeak ' + planView);
+    // Read the day selected in the calendar when there is one; otherwise the
+    // active list view (today/tomorrow/week). agenda_text takes a day offset
+    // from today, so compute it from the selected YYYY-MM-DD key.
+    let target = planView;
+    if (planMode === 'cal' && calSelected) {
+      const local = new Date();
+      const todayK = calKey(local);
+      const [sy, sm, sd] = calSelected.split('-').map(Number);
+      const [ty, tm, td] = todayK.split('-').map(Number);
+      const delta = Math.round((new Date(sy, sm - 1, sd) - new Date(ty, tm - 1, td)) / 86400000);
+      target = String(delta);
+    }
+    const r = await planCmd('syncspeak ' + target);
     show('planmsg', r, r.startsWith('error'));
     // Refresh the visible list with the same data we just read aloud.
     if (!r.startsWith('error')) loadPlans();
@@ -855,6 +877,20 @@ async function debugPhrase() {
     $('dbgresult').textContent = `Фраза: ${phrase}\nКто обрабатывает: ${owner}\nМаршрут: ${r.route}\n${r.detail}`;
   } catch (e) {
     $('dbgresult').textContent = 'Ошибка: ' + e;
+  }
+}
+
+async function sayPhrase() {
+  const phrase = $('sayphrase').value.trim();
+  if (!phrase) { $('sayresult').textContent = 'Введите фразу'; return; }
+  $('sayresult').textContent = 'Говорю…';
+  try {
+    const r = await (await fetch('/api/debug/say', { method:'POST', body:phrase })).json();
+    const owner = r.owner === 'yatv' ? 'YATV' : (r.owner === 'alice' ? 'Алиса' : String(r.owner));
+    const handed = r.owner === 'yatv' ? 'отдана YATV' : 'отдана штатной Алисе';
+    $('sayresult').textContent = `Сказано вслух: «${r.phrase}»\nКто обработал: ${owner}\nКому отдана: ${handed}\nМаршрут: ${r.route}\n${r.detail}`;
+  } catch (e) {
+    $('sayresult').textContent = 'Ошибка: ' + e;
   }
 }
 

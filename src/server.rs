@@ -135,6 +135,21 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
                 }
             }
         }
+        ("POST", "/api/debug/say") => {
+            // Test panel: say a phrase aloud through Alice and report who
+            // would handle it (and to whom it is handed over).
+            let text = body.trim();
+            let json = crate::classify_phrase(text);
+            crate::voice::say(text.to_owned());
+            let answer = serde_json::json!({
+                "phrase": text,
+                "spoken": true,
+                "owner": json["owner"],
+                "route": json["route"],
+                "detail": json["detail"],
+            });
+            ("200 OK", "application/json", answer.to_string())
+        }
         ("POST", "/api/debug/phrase") => {
             // Dry-run of the voice pipeline: shows which engine owns a phrase
             // without cancelling Alice or starting a brief.
