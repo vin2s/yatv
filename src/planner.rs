@@ -304,6 +304,14 @@ pub fn parse_when_full(text: &str, now: i64, off: i64) -> Option<When> {
                 } * 3600);
                 take(1, &mut used);
             }
+            "на" if words.get(i + 1).is_some_and(|n| WEEKDAYS.iter().any(|d| n.starts_with(d))) => {
+                let next = words[i + 1];
+                let wd = WEEKDAYS.iter().position(|d| next.starts_with(d)).unwrap_or(0);
+                let mut delta = (wd as i64 - weekday(today)).rem_euclid(7);
+                if delta == 0 { delta = 7; }
+                day = Some(today + delta);
+                take(2, &mut used);
+            }
             "на" if words.get(i + 1) == Some(&"следующей") && words.get(i + 2).is_some_and(|x| x.starts_with("недел")) => {
                 day = Some(today - weekday(today) + 7);
                 take(3, &mut used);
@@ -1033,6 +1041,17 @@ fn without_day(text: &str) -> String {
 
 fn asked_day(text: &str, today: i64) -> i64 {
     let w = text.to_lowercase();
+    // Only use the full parser for weekdays/calendar dates. For «сегодня/
+    // завтра/послезавтра» keep the simple offsets — parse_when_full fills a
+    // default clock time and would shift the day depending on the hour.
+    let weekday_or_date = WEEKDAYS.iter().any(|d| w.contains(d))
+        || ["январ", "феврал", "март", "апрел", "май", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр"].iter().any(|m| w.contains(m));
+    if weekday_or_date {
+        if let Some(when) = parse_when_full(text, now(), offset()) {
+            let (d, _) = local(when.due, offset());
+            return d;
+        }
+    }
     if w.contains("послезавтра") {
         today + 2
     } else if w.contains("завтра") {
@@ -1470,6 +1489,9 @@ mod tests {
         // A nonsense tail must stay with Alice.
         assert_eq!(voice("какие планы жизнь"), None);
         assert_eq!(voice("какие планы на завтра кофе"), None);
+        // A weekday must resolve to that weekday, not silently to today.
+        let sat = voice("какие планы на субботу");
+        assert!(matches!(sat, Some(Voice::Ask(Ask::Plans(d))) if d > 0));
         assert_eq!(voice("найди фильм колобок"), None);
         assert!(matches!(voice("добавь задачу проверить планы завтра в 10"), Some(Voice::AddTask(_))));
         assert!(matches!(voice("добавь дедлайн сдать отчёт завтра"), Some(Voice::AddTask(_))));
