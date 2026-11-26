@@ -320,7 +320,7 @@ code { background:var(--field); padding:1px 5px; border-radius:4px; }
     <button class="ghost" onclick="updateAction('check')">Проверить</button>
     <button onclick="updateAction('install')">Установить обновление</button>
   </div>
-  <label class="switch"><input type="checkbox" id="update_auto" checked onchange="saveUpdateAuto()"><span><b>Обновляться автоматически</b>
+  <label class="switch"><input type="checkbox" id="update_auto" onchange="saveUpdateAuto()"><span><b>Устанавливать автоматически (по умолчанию выключено)</b>
     <small>Другие колонки получат уведомление и поставят новую версию сами.</small></span></label>
   <div class="msg" id="updmsg"></div>
 </div>
@@ -863,7 +863,7 @@ async function saveUpdateAuto() {
 }
 function loadUpdate() {
   const u = (settings.update || {});
-  $('update_auto').checked = settings.update_auto !== false;
+  $('update_auto').checked = settings.update_auto === true;
   // «Что изменилось» is shown both when a version is available and when the
   // current one is already installed.
   $('updnotes').textContent = u.notes

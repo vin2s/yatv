@@ -95,10 +95,13 @@ fn main() {
             if u.due() {
                 match u.check() {
                     Ok(Some(rel)) => {
-                        log::add(&crate::state_dir(), "info", &format!("доступно обновление {}: будет установлено", rel.version));
-                        // Auto-install is on by default; the panel can turn it off.
+                        // Auto-install is OFF by default: a new release only
+                        // notifies. The panel shows the notes; install is a
+                        // deliberate button press.
+                        let notes = if rel.notes.is_empty() { String::new() } else { format!(": {}", rel.notes) };
+                        log::add(&crate::state_dir(), "info", &format!("доступно обновление {} (не устанавливается автоматически){}", rel.version, notes));
                         let s = settings::Settings::load(&crate::state_dir());
-                        if s.extra.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(true) {
+                        if s.extra.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(false) {
                             if let Err(e) = u.install() {
                                 eprintln!("update: auto install failed: {e}");
                             }

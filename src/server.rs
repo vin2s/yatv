@@ -232,7 +232,7 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
                 "tz_offset": settings.extra.get("tz_offset").and_then(|v| v.as_i64()),
                 "planner": crate::planner::json(),
                 "update": crate::updates().json(),
-                "update_auto": settings.extra.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(true),
+                "update_auto": settings.extra.get("update_auto").and_then(|v| v.as_bool()).unwrap_or(false),
                 
                 "journal": crate::log::latest(&crate::state_dir()),
             });
