@@ -162,7 +162,11 @@ fn handle(mut stream: TcpStream, tx: Sender<Cmd>) {
             crate::log::add(&crate::state_dir(), "debug", &format!(
                 "сказал фразу {text:?} → {}, {}; ответ {answer:?}", json["owner"], json["route"]
             ));
-            crate::voice::say(spoken.clone());
+            // The controller already spoke the answer for YATV phrases. Only
+            // repeat a phrase ourselves when it belongs to Alice (demo mode).
+            if owner != "yatv" {
+                crate::voice::say(spoken.clone());
+            }
             let result = serde_json::json!({
                 "phrase": text,
                 "spoken": spoken,
