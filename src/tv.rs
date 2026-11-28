@@ -785,51 +785,23 @@ fn search_in_app(sh: &dyn Fn(&str) -> Result<String, String>, pkg: &str, q: &str
         if focused {
             return true;
         }
-        // On a TV where adb runs as `shell` (not root), the app's own search
-        // activity is not exported: `am start -n` is refused with
-        // «Permission Denial … not exported». Open the app with `monkey`,
-        // press its search key, focus the field and type via ADBKeyBoard.
-        // `input text` cannot type Cyrillic, but ADBKeyBoard's B64 broadcast
-        // can — so the query keeps the exact Russian letters Alice heard.
-        if let Some(payload) = keyboard_payload(q) {
-            let open = format!("monkey -p {pkg} 1 >/dev/null 2>&1");
-            // Save the IME the TV was using, switch to ADBKeyBoard for the
-            // Unicode broadcast, then restore it. If ADBKeyBoard was already
-            // active (e.g. a previous run left it), fall back to the TV's
-            // standard ImeBridgeService instead of leaving our helper on.
-            // Pick the TV's own keyboard dynamically: B866 uses
-            // com.google.android.inputmethod.latin/.LatinIME, X3 uses the
-            // older com.android.inputmethod.latin/.LatinIME. Never hardcode.
-            // The first non-helper IME in the enabled list is the stock one.
-            let script = format!(
-                "OLD=$(settings get secure default_input_method 2>/dev/null); \
-                 STOCK=$(ime list -s 2>/dev/null | head -1); \
-                 case \"$OLD\" in *adbkeyboard*|*ImeBridgeService*|*ugoos*) OLD=\"$STOCK\" ;; esac; \
-                 ime enable com.android.adbkeyboard/.AdbIME >/dev/null 2>&1; \
-                 ime set com.android.adbkeyboard/.AdbIME >/dev/null 2>&1; \
-                 {open}; sleep 3; input tap 980 113; sleep 2; \
-                 am broadcast -a ADB_INPUT_B64 --es msg {}; \
-                 sleep 2; \
-                 input keyevent 4; \
-                 sleep 1; \
-                 if [ -n \"$OLD\" ] && [ \"$OLD\" != \"null\" ]; then \
-                   settings put secure default_input_method \"$OLD\" >/dev/null 2>&1; \
-                   ime set \"$OLD\" >/dev/null 2>&1; \
-                 fi",
-                adb::quote(&payload)
-            );
-            match sh(&script) {
-                Ok(_) => {
-                    let focused = sh("dumpsys window | grep mCurrentFocus")
-                        .map(|f| f.contains("ActivityTvSearch"))
-                        .unwrap_or(false);
-                    if focused {
-                        eprintln!("tv: {pkg}: search opened via ADBKeyBoard ({q})");
-                        return true;
-                    }
-                    eprintln!("tv: {pkg}: keyboard search did not open the search screen");
-                }
-                Err(e) => eprintln!("tv: {pkg}: keyboard search failed: {e}"),
+        // Retry the app's own search activity instead of typing the query
+        // again: a second ADBKeyBoard broadcast appends the same text to the
+        // field that --es query already filled («колобокколобок»). Wait for
+        // the window focus in a loop — the first `am start` may be refused
+        // while the app is still starting.
+        let retry = format!(
+            "for i in 1 2 3; do am start -n {pkg}/{activity} --es query {} >/dev/null 2>&1; sleep 2; \
+             dumpsys window | grep -q ActivityTvSearch && exit 0; done; exit 1",
+            adb::quote(q)
+        );
+        if sh(&retry).is_ok() {
+            let focused = sh("dumpsys window | grep mCurrentFocus")
+                .map(|f| f.contains("ActivityTvSearch"))
+                .unwrap_or(false);
+            if focused {
+                eprintln!("tv: {pkg}: search opened on retry ({q})");
+                return true;
             }
         }
     }
