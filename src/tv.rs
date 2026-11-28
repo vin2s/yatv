@@ -807,7 +807,7 @@ fn search_in_app(sh: &dyn Fn(&str) -> Result<String, String>, pkg: &str, q: &str
                  case \"$OLD\" in *adbkeyboard*|*ImeBridgeService*|*ugoos*) OLD=\"$STOCK\" ;; esac; \
                  ime enable com.android.adbkeyboard/.AdbIME >/dev/null 2>&1; \
                  ime set com.android.adbkeyboard/.AdbIME >/dev/null 2>&1; \
-                 {open}; sleep 4; input keyevent 84; sleep 2; input tap 980 113; sleep 2; \
+                 {open}; sleep 3; input tap 980 113; sleep 2; \
                  am broadcast -a ADB_INPUT_B64 --es msg {}; \
                  sleep 2; \
                  input keyevent 4; \
